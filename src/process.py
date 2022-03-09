@@ -16,14 +16,18 @@ from lib.color import linear_to_srgb, srgb_to_linear
 fast_srgb_conv = False
 
 ### Controls whether to generate output images in the `output/` folder.
+
+# Flag to disable all image saving
+disable_all_saving = False
+
+# Output full image with overlaid red/yellow/green rectangles
+generate_highlights = True
 # Output crops of correct detections (true positives)
 generate_correct = True
 # Output crops of missed detections (false negatives)
 generate_missed = True
 # Output crops of wrong detections (false positives)
 generate_wrong = True
-# Output full image with overlaid red/yellow/green rectangles
-generate_highlights = True
 
 
 
@@ -65,6 +69,8 @@ def load_image(path) -> OriginalImage:
 
 
 def save_image(image: np.ndarray, path) -> None:
+    if disable_all_saving:
+        return
     image = np.clip(image, 0, 1)
     image = linear_to_srgb(image, fast=fast_srgb_conv)
     image *= 255
