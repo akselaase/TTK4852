@@ -11,6 +11,22 @@ import numpy as np
 
 from lib.color import linear_to_srgb, srgb_to_linear
 
+
+# Controls whether to use a faster approximate SRGB-conversion (3x faster)
+fast_srgb_conv = False
+
+### Controls whether to generate output images in the `output/` folder.
+# Output crops of correct detections (true positives)
+generate_correct = True
+# Output crops of missed detections (false negatives)
+generate_missed = True
+# Output crops of wrong detections (false positives)
+generate_wrong = True
+# Output full image with overlaid red/yellow/green rectangles
+generate_highlights = True
+
+
+
 OriginalImage = NewType('OriginalImage', np.ndarray)
 DiffedImage = NewType('DiffedImage', np.ndarray)
 Prediction = tuple[tuple[int, int], float]
@@ -44,14 +60,13 @@ def load_labels(path: Path) -> set[tuple[int, int]]:
 @timeit
 def load_image(path) -> OriginalImage:
     image = cv2.imread(str(path), cv2.IMREAD_COLOR) / 255.0
-    image = srgb_to_linear(image)
+    image = srgb_to_linear(image, fast=fast_srgb_conv)
     return image
 
 
-@timeit
 def save_image(image: np.ndarray, path) -> None:
     image = np.clip(image, 0, 1)
-    image = linear_to_srgb(image)
+    image = linear_to_srgb(image, fast=fast_srgb_conv)
     image *= 255
     cv2.imwrite(str(path), image)
 
@@ -168,23 +183,38 @@ def paint_rect(image: OriginalImage, center: tuple[int, int], color: np.ndarray)
 
 
 def hightlight_predictions(image: OriginalImage, correct: Sequence[Prediction], wrong: Sequence[Prediction], labels: Sequence[tuple[int, int]], image_name: str):
-    painted = image.copy()
+    if not (
+        generate_wrong or generate_correct or 
+        generate_missed or generate_highlights
+    ):
+        return
+
     diffed = diff_channels(image)
 
+    if generate_highlights:
+        painted = image.copy()
+
     for i, pred in enumerate(correct):
-        save_prediction(image, pred[0], f'{image_name}_correct{i}')
-        save_prediction(diffed, pred[0], f'{image_name}_correct{i}_diff')
-        paint_rect(painted, pred[0], np.array([0, 1, 0]))
+        if generate_correct:
+            save_prediction(image, pred[0], f'{image_name}_correct{i}')
+            save_prediction(diffed, pred[0], f'{image_name}_correct{i}_diff')
+        if generate_highlights:
+            paint_rect(painted, pred[0], np.array([0, 1, 0]))
     for i, pred in enumerate(wrong):
-        save_prediction(image, pred[0], f'{image_name}_wrong{i}')
-        save_prediction(diffed, pred[0], f'{image_name}_wrong{i}_diff')
-        paint_rect(painted, pred[0], np.array([0, 0, 1]))
+        if generate_wrong:
+            save_prediction(image, pred[0], f'{image_name}_wrong{i}')
+            save_prediction(diffed, pred[0], f'{image_name}_wrong{i}_diff')
+        if generate_highlights:
+            paint_rect(painted, pred[0], np.array([0, 0, 1]))
     for i, lbl in enumerate(labels):
-        save_prediction(image, lbl, f'{image_name}_missed{i}')
-        save_prediction(diffed, lbl, f'{image_name}_missed{i}_diff')
-        paint_rect(painted, lbl, np.array([0, 1, 1]))
+        if generate_missed:
+            save_prediction(image, lbl, f'{image_name}_missed{i}')
+            save_prediction(diffed, lbl, f'{image_name}_missed{i}_diff')
+        if generate_highlights:
+            paint_rect(painted, lbl, np.array([0, 1, 1]))
     
-    save_image(painted, f'output/{image_name}_painted.png')
+    if generate_highlights:
+        save_image(painted, f'output/{image_name}_painted.png')
 
 
 def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
