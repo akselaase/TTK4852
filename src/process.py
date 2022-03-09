@@ -57,6 +57,8 @@ def save_image(image: np.ndarray, path) -> None:
 
 
 def diff_channels(image: OriginalImage) -> DiffedImage:
+    """Diff-process the image by subtracting each channel from
+    all the others. Highlights pure-colors and movement."""
     num_channels = image.shape[2]
     channel_indices = set(range(num_channels))
     res = image.copy()
@@ -68,14 +70,9 @@ def diff_channels(image: OriginalImage) -> DiffedImage:
     return cast(DiffedImage, np.maximum(res, 0))
 
 
-def find_plane(diffed: DiffedImage) -> Prediction:
-    """Find the plane in a diffed image by returning the brightest green pixel."""
-    green = diffed[:, :, 1]
-    (x, y) = np.unravel_index(np.argmax(green), green.shape)
-    return (x, y), green[x, y] # type: ignore
-
-
 def find_bright_pixels(image: OriginalImage, threshold: float, best_n: int) -> list[Prediction]:
+    """Finds the `best_n` brightest green pixels after diff-processing in the given image."""
+
     diffed = diff_channels(image)
     save_image(diffed, 'diffed.png')
 
@@ -97,10 +94,14 @@ def find_bright_pixels(image: OriginalImage, threshold: float, best_n: int) -> l
 
 
 def png_to_txt(path: Path) -> Path:
+    """Generates the expected .txt annotation filename for the given .png filename."""
     return path.with_stem(path.stem.removesuffix('_image')).with_suffix('.txt')
 
 
 def load_dataset_paths(dir, recursive: bool = True) -> list[tuple[Path, Path]]:
+    """Recursively scans the filesystem for *.png and *.txt files.
+    Returns a list of tuples consisting of the .png file and
+    corresponding .txt annotation file."""
     pairs: list[tuple[Path, Path]] = []
     texts: set[Path] = set()
     for entry in Path(dir).iterdir():
@@ -119,6 +120,8 @@ def load_dataset_paths(dir, recursive: bool = True) -> list[tuple[Path, Path]]:
 
 
 def evaluate_prediction(prediction: tuple[int, int], labels: set[tuple[int, int]]) -> tuple[tuple[int, int], float]:
+    """Loop through all labels and find the closest one."""
+
     if not labels:
         raise ValueError('Empty set of labels.')
 
@@ -138,48 +141,9 @@ def evaluate_prediction(prediction: tuple[int, int], labels: set[tuple[int, int]
     return (label, min_dist)
 
 
-def categorize_predictions(
-    predictions: list[Prediction],
-    labels: set[tuple[int, int]],
-    max_dist: float
-) -> tuple[
-    list[Prediction], # correct predictions
-    list[Prediction], # wrong predictions
-    set[tuple[int, int]] # remaining labels
-]:
-    labels = set(labels)
-    correct: list[Prediction] = []
-    wrong: list[Prediction] = []
-    while labels and predictions:
-        # Pop off top prediction
-        pred, *predictions = predictions
-        label, dist = evaluate_prediction(pred[0], labels)
-        if dist <= max_dist:
-            correct.append(pred)
-            labels.remove(label)
-        else:
-            wrong.append(pred)
-    # Remaining predictions must be wrong
-    wrong.extend(predictions)
-    return correct, wrong, labels
-
-
-def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
-    diffed[x-radius:x+radius, y-radius:y+radius, 1] = 0
-
-
-def find_planes(image: OriginalImage, n: int, clear_radius: int) -> list[Prediction]:
-    diffed = diff_channels(image)
-    predictions: list[Prediction] = []
-    for _ in range(n):
-        pred = find_plane(diffed)
-        (x, y), val = pred
-        predictions.append(pred)
-        clear_region(diffed, x, y, clear_radius)
-    return predictions
-
-
 def rect(cx: int, cy: int, size: int) -> tuple[int, int, int, int]:
+    """Turn a center coordinate and side length into
+    a tuple of two of the corners of the rectangle."""
     return (
         max(0, cx - size), cx + size + 1,
         max(0, cy - size), cy + size + 1
@@ -221,7 +185,86 @@ def hightlight_predictions(image: OriginalImage, correct: Sequence[Prediction], 
         paint_rect(painted, lbl, np.array([0, 1, 1]))
     
     save_image(painted, f'output/{image_name}_painted.png')
+
+
+def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
+    diffed[x-radius:x+radius, y-radius:y+radius, 1] = 0
+
+
+def validate_prediction(image: OriginalImage, diffed: DiffedImage, pred: Prediction) -> bool:
+    """Perform validation on the given prediction."""
+    (x, y), diff_green_value = pred
+
+    # Use the pixel coordinates, diffed pixel value, and optionally data from
+    # `image` and `diffed` to evaluate whether this is a false positive or not.
+
+    # Get the original BGR color like this for instance:
+    # `b, g, r = image[x, y, :]`
+
+    # Return False if this is a false positive.
+    return True
     
+
+def find_plane(diffed: DiffedImage) -> Prediction:
+    """Find the plane in a diffed image by returning the brightest green pixel."""
+    green_channel = diffed[:, :, 1]
+    (x, y) = np.unravel_index(np.argmax(green_channel), green_channel.shape)
+    return (x, y), green_channel[x, y] # type: ignore
+
+
+def categorize_predictions(
+    predictions: list[Prediction],
+    labels: set[tuple[int, int]],
+    max_dist: float
+) -> tuple[
+    list[Prediction], # correct predictions
+    list[Prediction], # wrong predictions
+    set[tuple[int, int]] # remaining labels
+]:
+    labels = set(labels)
+    correct: list[Prediction] = []
+    wrong: list[Prediction] = []
+    while labels and predictions:
+        # Pop off top prediction
+        pred, *predictions = predictions
+        label, dist = evaluate_prediction(pred[0], labels)
+        if dist <= max_dist:
+            correct.append(pred)
+            labels.remove(label)
+        else:
+            wrong.append(pred)
+    # Remaining predictions must be wrong
+    wrong.extend(predictions)
+    return correct, wrong, labels
+
+
+def find_planes(image: OriginalImage, n: int, clear_radius: int) -> list[Prediction]:
+    """Find `n` planes in the given image, clearing an square of 
+    `clear_radius` side for each detection."""
+    diffed = diff_channels(image)
+
+    iteration_limit = 4 * n
+    predictions: list[Prediction] = []
+
+    # Iterate until we've found enough planes
+    # (or hit the maximum iteration limit).
+    while len(predictions) < n:
+        pred = find_plane(diffed)
+
+        if validate_prediction(image, diffed, pred):
+            (x, y), val = pred
+            predictions.append(pred)
+        
+        # Clear region anyway to avoid searching this area again.
+        # (might discard planes nearby, but oh well...)
+        clear_region(diffed, x, y, clear_radius)
+
+        iteration_limit -= 1
+        if iteration_limit == 0:
+            break
+
+    return predictions
+
 
 @dataclass
 class ImageResults:
@@ -252,9 +295,14 @@ def test_image_predictions(image: OriginalImage, labels: set[tuple[int, int]], r
 
 
 def test_dataset(dir: Path):
+    """Evaluate accuracy on a whole dataset."""
+
     image_label_pairs = load_dataset_paths(dir, True)
     print(f'Found {len(image_label_pairs)} images.')
 
+    Path('output').mkdir(exist_ok=True)
+
+    # Sort by smallest filesize first
     image_label_pairs.sort(key=lambda pair: pair[0].stat().st_size)
 
     n_correct = 0
@@ -262,6 +310,7 @@ def test_dataset(dir: Path):
     
     for png, txt in image_label_pairs:
         labels = load_labels(txt)
+        # Check if there are any planes in the image
         if labels:
             print(f'{png.name} ({png.stat().st_size / 1024**2:.1f} MiB): ', end='')
             image = load_image(png)
@@ -296,7 +345,9 @@ if __name__ == '__main__':
     path = Path(sys.argv[1])
     if path.is_dir():
         test_dataset(path)
+
     elif path.is_file():
         process_single_image(path)
+
     else:
         print('Invalid filetype.')
