@@ -222,18 +222,31 @@ class ValidationResult:
     radius: float
 
 
-def validate_prediction(image: OriginalImage, diffed: DiffedImage, pred: Prediction) -> ValidationResult:
-    """Perform validation on the given prediction."""
-    (x, y), diff_green_value = pred
+def validate_prediction(
+    image: OriginalImage,
+    diffed: DiffedImage,
+    pred: Prediction
+) -> ValidationResult:
+    """Perform validation on the given prediction
+    and return some estimates about the plane."""
+    (x, y), _ = pred
 
     # Use the pixel coordinates, diffed pixel value, and optionally data from
     # `image` and `diffed` to evaluate whether this is a false positive or not.
 
     # Get the original BGR color like this for instance:
     # `b, g, r = image[x, y, :]`
+    # And filtered BGR color like this:
+    # `b, g, r = diffed[x, y, :]`
 
     # Return False if this is a false positive.
-    return ValidationResult(True)
+    return ValidationResult(
+        valid=True,
+        green_center=(x, y),
+        red_center=(0, 0), # todo: estimate position in red channel
+        blue_center=(0, 0), # todo: estimate position in blue channel
+        radius=0 # todo: estimate size (radius) of plane
+    )
     
 
 def find_plane(diffed: DiffedImage) -> Prediction:
@@ -281,11 +294,12 @@ def find_planes(image: OriginalImage, n: int, clear_radius: int) -> list[Predict
     # (or hit the maximum iteration limit).
     while len(predictions) < n:
         pred = find_plane(diffed)
+        (x, y), _ = pred
 
-        if validate_prediction(image, diffed, pred):
-            (x, y), val = pred
+        validation = validate_prediction(image, diffed, pred)
+        if validation.valid:
             predictions.append(pred)
-            do_parameter_estimation(image, diffed, (x, y), (rx, ry), (bx, by))
+            # do_parameter_estimation(image, diffed, validation)
         
         # Clear region anyway to avoid searching this area again.
         # (might discard planes nearby, but oh well...)
