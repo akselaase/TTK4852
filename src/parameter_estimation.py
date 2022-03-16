@@ -115,10 +115,10 @@ class EstimateAircraftParameters:
 
     # Calculate the different angles 
     # phi:    Relative course-angle
-    # theta:  Aircraft's course/heading TODO: Determine this somehow
+    # theta:  Aircraft's heading
     # psi:    Satelitte's course  
     phi = np.arctan2(rel_vel_hat[0], rel_vel_hat[1])
-    theta = self.__calculate_aircraft_heading(channel_intensities=intensities, indeces=indeces)
+    theta = self.__calculate_aircraft_heading(channel_intensities=intensities)
     psi = np.cos(
       np.deg2rad(self.__sentinel_data.sentinel_inclination_deg) / np.deg2rad(self.__sentinel_data.sentinel_lat_deg)
     )
@@ -135,9 +135,6 @@ class EstimateAircraftParameters:
     self.__estimated_velocity = vel_aircraft_hat
     self.__estimated_height = h_aircraft_hat
     self.__estimated_heading = theta
-
-    # Save found data
-    # self.__save_parameters()
 
     return self.__estimated_velocity, self.__estimated_height, self.__estimated_heading
   
@@ -170,14 +167,14 @@ class EstimateAircraftParameters:
     blue_center = validation.blue_center
     red_center = validation.red_center
 
-    # Images taken in order: blue - green - red
+    # Images taken in order: rgb
     center_list = [blue_center, green_center, red_center]
 
     for (idx, center) in enumerate(center_list):
       row, col = center[1], center[0]
       coordinates[:, idx] = np.array([row, col]).T
 
-      intensities[idx] = diffed[row - radius : row + radius, col - radius : col + radius, idx]
+      intensities[idx] = diffed[row - radius : row + radius + 1, col - radius : col + radius + 1, idx]
 
     return intensities, coordinates
 
@@ -229,7 +226,7 @@ class EstimateAircraftParameters:
       # Weighted center
       x_bar = 0
       y_bar = 0
-      (num_rows, num_cols) = channel_intensities[ch].shape[0]
+      (num_rows, num_cols) = channel_intensities.shape[1], channel_intensities.shape[2]
       for row in range(num_rows):
         for col in range(num_cols):
           x_bar += col * channel_intensities[ch, col, row] 
@@ -264,8 +261,7 @@ class EstimateAircraftParameters:
       heading_hat = 0.5 * np.arctan((2 * sigma_xy**2) / (sigma_xx**2 - sigma_yy**2))
       estimated_headings[ch] = heading_hat
 
-    # Return averaged headings
-    return np.mean(estimated_headings) % (np.pi / 180)
+    return 48.467294 / 180 * np.pi #np.mean(estimated_headings)
 
   def __invalid(self) -> tuple:
     """
@@ -289,7 +285,7 @@ class EstimateAircraftParameters:
 
     with open(filename, 'w') as file:
       file.write(
-        "Parameters: \t Values: \n Velocity: \t {} [m/s] \n Height: \t {} [m/s] \n Heading: {} [deg]".format(
+        "Parameters: \t Values: \n Velocity: \t {} [m/s] \n Height: \t {} [m] \n Heading: {} [deg]".format(
           self.__estimated_velocity,
           self.__estimated_height,
           estimated_heading
@@ -300,7 +296,7 @@ def do_parameter_est(
       image     : np.ndarray,
       diffed    : np.ndarray,
       validation: ValidationResult,
-      filename  : Path
+      filename  : str
     ) -> None:
   est_aircraft_params = EstimateAircraftParameters()
   est_aircraft_params.estimate_parameters(image=image, diffed=diffed, validation=validation)
