@@ -153,9 +153,12 @@ class EstimateAircraftParameters:
     
     images will be given as ndarray: [row, col, color]
     b, g, r = 0, 1, 2
+
+    Unsure how to include the raw image, and if it is usable
+    at all?
     """
     radius = validation.radius
-    self.__num_channels = image.shape[2]
+    self.__num_channels = diffed.shape[2]
 
     # Set memory
     intensities = np.zeros((self.__num_channels, 2*radius + 1, 2*radius + 1))
