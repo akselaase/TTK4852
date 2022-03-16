@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Iterable
+import cv2
 import numpy as np
 import matplotlib.pyplot as plt # type: ignore
 from process import save_image, load_image
@@ -71,31 +72,56 @@ def find_all_blobs(mask_array: np.ndarray) -> list[Blob]:
         remaining_indices.difference_update(blob.pixels)
     return blobs
 
+
+def weighted_center(pixels: Iterable[tuple[int, int]], weights: np.ndarray) -> tuple[float, float]:
+    center = np.zeros(2)
+    total_weight = 0
+    for (row, col) in pixels:
+        center += np.array((row, col)) * weights[row, col]
+        total_weight += weights[row, col]
+    if total_weight > 0:
+        center /= total_weight
+    return (center[0], center[1])
+
+def find_plane(channel: np.ndarray, channel_diff: np.ndarray, threshold: float, key):
+    max_row, max_col = np.unravel_index(np.argmax(channel_diff), channel_diff.shape)
+    mask = channel > (threshold * channel[max_row, max_col])
+    blob = find_blob(mask, (max_row, max_col))
+    pos = weighted_center(blob.pixels, channel**2)
+    save_image(channel, f'testing/chan_{key}.png')
+    save_image(channel_diff, f'testing/chan_diff_{key}.png')
+    save_image(mask, f'testing/chan_mask_{key}.png')
+    save_image(mask * channel**2, f'testing/chan_weights_{key}.png')
+    return pos, blob
+
 def main():
     image = load_image('output.bak/2020-01-10-10-36-57_image_correct0.png')
     diffed = load_image('output.bak/2020-01-10-10-36-57_image_correct0_diff.png')
+
+    save_image(image, 'testing/image.png')
+    save_image(diffed, 'testing/diffed.png')
+
+    scale = 5
+    blobs = image.copy()
+    subsampled = cv2.resize(image, (diffed.shape[0] * scale, diffed.shape[1] * scale), interpolation=cv2.INTER_NEAREST)
     
-    image_B = image[:, :, 0]
-    image_G = image[:, :, 1]
-    image_R = image[:, :, 2]
+    positions: list[tuple[int, int]] = []
 
-    diff_B = diffed[:, :, 0]
-    diff_G = diffed[:, :, 1]
-    diff_R = diffed[:, :, 2]
+    for channel in [0, 1, 2]:
+        (r, c), blob = find_plane(
+            image[:,:,channel],
+            diffed[:,:,channel],
+            threshold=0.30,
+            key=channel,
+        )
+        scaled = round(r * scale), round(c * scale)
+        print(f'{channel}: {r:.1f}, {c:.1f}')
+        subsampled[scaled[0], scaled[1], :] = 1
+        blobs[tuple(zip(*blob.np_pixels))] = 1
+        positions.append(scaled)
 
-    cr, cc = (image.shape[0] // 2, image.shape[1] // 2)
-
-    cr, cc = np.unravel_index(np.argmax(diff_B), diff_B.shape)
-    bright_blue = image_B >= (0.50 * image_B[cr, cc])
-    image_R[bright_blue] = 1
-    save_image(image, 'tmp.png')
-
-    plt.plot(image_B[cr, :], label='Original row')
-    plt.plot(image_B[:, cc], label='Original column')
-    plt.plot(diff_B[cr, :], label='Diffed row')
-    plt.plot(diff_B[:, cc], label='Diffed column')
-    plt.legend()
-    plt.show()
+    save_image(subsampled, 'testing/subsampled.png')
+    save_image(blobs, 'testing/blobs.png')
 
 
 if __name__ == '__main__':
