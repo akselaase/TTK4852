@@ -12,6 +12,14 @@
             "program": "${workspaceFolder}/src/process.py",
             "cwd": "${workspaceFolder}/src",
             "args": [ "../../covid19-custom-script-contest/annotations/FRA" ]
+        },
+        {
+            "name": "testing.py",
+            "type": "python",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "${workspaceFolder}/src/testing.py",
+            "cwd": "${workspaceFolder}/src"
         }
     ]
 }
