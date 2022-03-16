@@ -16,7 +16,7 @@ from lib.timeit import timeit
 fast_srgb_conv = False
 
 # Controls whether we process images in parallel
-parallel_processing = True
+parallel_processing = False
 
 ### Controls whether to generate output images in the `output/` folder.
 
@@ -213,7 +213,16 @@ def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
     diffed[x-radius:x+radius, y-radius:y+radius, 1] = 0
 
 
-def validate_prediction(image: OriginalImage, diffed: DiffedImage, pred: Prediction) -> bool:
+@dataclass
+class ValidationResult:
+    valid: bool
+    green_center: tuple[int, int]
+    red_center: tuple[int, int]
+    blue_center: tuple[int, int]
+    radius: float
+
+
+def validate_prediction(image: OriginalImage, diffed: DiffedImage, pred: Prediction) -> ValidationResult:
     """Perform validation on the given prediction."""
     (x, y), diff_green_value = pred
 
@@ -224,7 +233,7 @@ def validate_prediction(image: OriginalImage, diffed: DiffedImage, pred: Predict
     # `b, g, r = image[x, y, :]`
 
     # Return False if this is a false positive.
-    return True
+    return ValidationResult(True)
     
 
 def find_plane(diffed: DiffedImage) -> Prediction:
@@ -276,6 +285,7 @@ def find_planes(image: OriginalImage, n: int, clear_radius: int) -> list[Predict
         if validate_prediction(image, diffed, pred):
             (x, y), val = pred
             predictions.append(pred)
+            do_parameter_estimation(image, diffed, (x, y), (rx, ry), (bx, by))
         
         # Clear region anyway to avoid searching this area again.
         # (might discard planes nearby, but oh well...)
