@@ -1,10 +1,9 @@
-import functools
 import gc
+import multiprocessing
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, NewType, Sequence, TypeVar, cast
+from typing import NewType, Sequence, cast
 
 import cv2  # type: ignore
 import numpy as np
@@ -15,6 +14,9 @@ from lib.timeit import timeit
 
 # Controls whether to use a faster approximate SRGB-conversion (3x faster)
 fast_srgb_conv = False
+
+# Controls whether we process images in parallel
+parallel_processing = True
 
 ### Controls whether to generate output images in the `output/` folder.
 
@@ -29,7 +31,6 @@ generate_correct = True
 generate_missed = True
 # Output crops of wrong detections (false positives)
 generate_wrong = True
-
 
 
 OriginalImage = NewType('OriginalImage', np.ndarray)
@@ -315,6 +316,35 @@ def test_image_predictions(image: OriginalImage, labels: set[tuple[int, int]], r
     )
 
 
+def evaluate_dataset_entry(pair: tuple[Path, Path]) -> tuple[int, int]:
+    png, txt = pair
+
+    n_correct = 0
+    n_total = 0
+
+    labels = load_labels(txt)
+    # Check if there are any planes in the image
+    if labels:
+        if not parallel_processing:
+            print(f'{png.name} ({png.stat().st_size / 1024**2:.1f} MiB): ', end='')
+
+        image = load_image(png)
+
+        res = test_image_predictions(image, labels, radius=5)
+        n_correct = res.num_correct
+        n_total = res.num_total
+
+        if not parallel_processing:
+            print(f'{res.num_correct} / {res.num_total}')
+            print(f'    Labels: {res.labels}')
+            print(f'    Predictions: {res.predictions}')
+
+        hightlight_predictions(image, res.correct, res.wrong, res.remaining_labels, png.stem)
+
+    gc.collect()
+    return (n_correct, n_total)
+
+
 def test_dataset(dir: Path):
     """Evaluate accuracy on a whole dataset."""
 
@@ -326,29 +356,19 @@ def test_dataset(dir: Path):
     # Sort by smallest filesize first
     image_label_pairs.sort(key=lambda pair: pair[0].stat().st_size)
 
-    n_correct = 0
-    n_total = 0
+    if parallel_processing:
+        with multiprocessing.Pool() as pool:
+            res = pool.map(evaluate_dataset_entry, image_label_pairs)
+    else:
+        res = list(map(evaluate_dataset_entry, image_label_pairs))
     
-    for png, txt in image_label_pairs:
-        labels = load_labels(txt)
-        # Check if there are any planes in the image
-        if labels:
-            print(f'{png.name} ({png.stat().st_size / 1024**2:.1f} MiB): ', end='')
-            image = load_image(png)
+    sum_correct = 0
+    sum_total = 0
+    for n_correct, n_total in res:
+        sum_correct += n_correct
+        sum_total += n_total
 
-            res = test_image_predictions(image, labels, radius=5)
-            n_correct += res.num_correct
-            n_total += res.num_total
-
-            print(f'{res.num_correct} / {res.num_total}')
-            print(f'    Labels: {res.labels}')
-            print(f'    Predictions: {res.predictions}')
-
-            hightlight_predictions(image, res.correct, res.wrong, res.remaining_labels, png.stem)
-
-        gc.collect()
-
-    accuracy = n_correct / n_total
+    accuracy = sum_correct / sum_total
     print(f'{accuracy=}')
 
 
