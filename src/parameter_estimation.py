@@ -35,9 +35,14 @@ class SentinelData:
   )
 
 class EstimateAircraftParameters:
-  def __init__(self) -> None:
-    self.__sentinel_data = SentinelData()
+  def __init__(
+        self,
+        filename : str
+      ) -> None:
     
+    self.__sentinel_data = SentinelData()
+    self.__filename = filename
+
     self.__estimated_velocity = None
     self.__estimated_height = None
     self.__estimated_heading = None
@@ -278,14 +283,12 @@ class EstimateAircraftParameters:
     return self.__estimated_velocity, self.__estimated_height, self.__estimated_heading
 
   def __save_parameters(self) -> None:
-    file_name = "" # Implement this later
-
     if self.__estimated_heading is None:
       estimated_heading = None
     else:
       estimated_heading = self.__estimated_heading * 180 / np.pi
 
-    with open(file_name, 'w') as file:
+    with open(self.__filename, 'w') as file:
       file.write(
         "Parameters: \t Values: \n Velocity: \t {} [m/s] \n Height: \t {} [m/s] \n Heading: {} [deg]".format(
           self.__estimated_velocity,
