@@ -120,6 +120,15 @@ def main():
         blobs[tuple(zip(*blob.np_pixels))] = 1
         positions.append(scaled)
 
+    p_b, p_g, p_r = map(np.array, map(tuple, map(reversed, positions)))
+    expected_r = (p_g - p_b) * (1.005 / 0.527) + p_b
+    expected_g = (p_r - p_b) * (0.527 / 1.005) + p_b
+    expected_b = (p_g - p_r) * (1.005 / (1.005 - 0.527)) + p_r
+    cv2.line(subsampled, p_b, p_r, (0.4, 0.4, 0.4), 1, cv2.LINE_AA)
+    subsampled[round(expected_r[1]), round(expected_r[0])] = (1, 0, 0) 
+    subsampled[round(expected_g[1]), round(expected_g[0])] = (0, 0, 1) 
+    subsampled[round(expected_b[1]), round(expected_b[0])] = (0, 1, 0) 
+
     save_image(subsampled, 'testing/subsampled.png')
     save_image(blobs, 'testing/blobs.png')
 
