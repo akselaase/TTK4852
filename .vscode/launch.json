@@ -1,0 +1,25 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "process.py",
+            "type": "python",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "${workspaceFolder}/src/process.py",
+            "cwd": "${workspaceFolder}/src",
+            "args": [ "../../covid19-custom-script-contest/annotations/FRA" ]
+        },
+        {
+            "name": "testing.py",
+            "type": "python",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "${workspaceFolder}/src/testing.py",
+            "cwd": "${workspaceFolder}/src"
+        }
+    ]
+}

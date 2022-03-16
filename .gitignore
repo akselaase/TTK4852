@@ -1,2 +1,8 @@
 /.envrc
 /.venv/
+
+/src/output/
+*.png
+
+__pycache__/
+*.pyc
