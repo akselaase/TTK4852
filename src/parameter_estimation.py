@@ -94,8 +94,15 @@ class EstimateAircraftParameters:
     rel_vel_hat_arr = np.zeros((2, num_measurements - 1))
 
     for idx in range(num_measurements - 1):
-      current_measurement = coordinates[:, idx]
-      next_measurement = coordinates[:, idx + 1]
+      current_measurement = coordinates[:, -(coordinates.shape[1] - 1) + idx]
+      next_measurement = coordinates[:, -(coordinates.shape[1] - 1) + idx + 1]
+
+      print(current_measurement)
+      print(next_measurement)
+      print(" ")
+
+      # current_measurement = coordinates[:, idx]
+      # next_measurement = coordinates[:, idx + 1]
       
       d_pos = next_measurement - current_measurement
 
@@ -132,8 +139,11 @@ class EstimateAircraftParameters:
     vel_aircraft_hat = np.sin(phi - psi) / np.sin(theta - psi) * np.linalg.norm(rel_vel_hat)
     h_aircraft_hat = np.sin(phi - theta) / np.sin(theta - psi) * np.linalg.norm(rel_vel_hat) / self.__sentinel_data.sentinel_abs_vel * self.__sentinel_data.sentinel_height_m 
 
-    self.__estimated_velocity = vel_aircraft_hat
-    self.__estimated_height = h_aircraft_hat
+    print(vel_aircraft_hat)
+    print(h_aircraft_hat)
+
+    self.__estimated_velocity = np.abs(vel_aircraft_hat)
+    self.__estimated_height = np.abs(h_aircraft_hat)
     self.__estimated_heading = theta
 
     return self.__estimated_velocity, self.__estimated_height, self.__estimated_heading
@@ -171,7 +181,7 @@ class EstimateAircraftParameters:
     center_list = [blue_center, green_center, red_center]
 
     for (idx, center) in enumerate(center_list):
-      row, col = center[1], center[0]
+      row, col = center[0], center[1]
       coordinates[:, idx] = np.array([row, col]).T
 
       intensities[idx] = diffed[row - radius : row + radius + 1, col - radius : col + radius + 1, idx]
@@ -224,13 +234,18 @@ class EstimateAircraftParameters:
         return self.__invalid_heading
 
       # Weighted center
-      x_bar = 0
-      y_bar = 0
-      (num_rows, num_cols) = channel_intensities.shape[1], channel_intensities.shape[2]
-      for row in range(num_rows):
-        for col in range(num_cols):
-          x_bar += col * channel_intensities[ch, col, row] 
-          y_bar += row * channel_intensities[ch, col, row] 
+
+      # Think there is an error here!
+      # x_bar = 0
+      # y_bar = 0
+      # (num_rows, num_cols) = channel_intensities.shape[1], channel_intensities.shape[2]
+      # for row in range(num_rows):
+      #   for col in range(num_cols):
+      #     x_bar += col * channel_intensities[ch, col, row] 
+      #     y_bar += row * channel_intensities[ch, col, row] 
+
+      x_bar = np.mean(np.mean(channel_intensities[ch], axis=0))
+      y_bar = np.mean(np.mean(channel_intensities[ch], axis=1))
       
       x_bar = x_bar * channel_resolution_m / channel_reflectance
       y_bar = y_bar * channel_resolution_m / channel_reflectance
@@ -238,15 +253,20 @@ class EstimateAircraftParameters:
       weighted_coordinates[:, ch] = np.array([x_bar, y_bar]).T
 
       # Covariances
-      sigma_xx = 0
-      sigma_xy = 0
-      sigma_yy = 0
-      for row in range(num_rows):
-        for col in range(num_cols):
-          sigma_xx += (col**2) * channel_intensities[ch, col, row] 
-          sigma_xy += (col * row) * channel_intensities[ch, col, row] 
-          sigma_yy += (row**2) * channel_intensities[ch, col, row] 
+      # sigma_xx = 0
+      # sigma_xy = 0
+      # sigma_yy = 0
+      # for row in range(num_rows):
+      #   for col in range(num_cols):
+      #     sigma_xx += (col**2) * channel_intensities[ch, col, row] 
+      #     sigma_xy += (col * row) * channel_intensities[ch, col, row] 
+      #     sigma_yy += (row**2) * channel_intensities[ch, col, row] 
+      channel_intensity_cov = np.cov(channel_intensities[ch])
       
+      sigma_xx = channel_intensity_cov[0,0]
+      sigma_yy = channel_intensity_cov[1,1]
+      sigma_xy = channel_intensity_cov[0,1]
+
       sigma_xx = sigma_xx * ((channel_resolution_m / channel_reflectance)**2) - (x_bar**2)
       sigma_xy = sigma_xy * ((channel_resolution_m / channel_reflectance)**2) - (x_bar * y_bar)
       sigma_yy = sigma_yy * ((channel_resolution_m / channel_reflectance)**2) - (y_bar**2)
@@ -261,7 +281,8 @@ class EstimateAircraftParameters:
       heading_hat = 0.5 * np.arctan((2 * sigma_xy**2) / (sigma_xx**2 - sigma_yy**2))
       estimated_headings[ch] = heading_hat
 
-    return 48.467294 / 180 * np.pi #np.mean(estimated_headings)
+    return np.mean(estimated_headings) % (2 * np.pi)
+    # return 134.2862 / 180 * np.pi
 
   def __invalid(self) -> tuple:
     """

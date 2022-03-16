@@ -1,0 +1,4 @@
+Parameters: 	 Values: 
+ Velocity: 	 -290.2121143456326 [m/s] 
+ Height: 	 -51150.718093939555 [m/s] 
+ Heading: 0.9609885450459218 [deg]
