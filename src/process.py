@@ -10,6 +10,7 @@ import cv2  # type: ignore
 import numpy as np
 
 from lib.color import linear_to_srgb, srgb_to_linear
+from lib.timeit import timeit
 
 
 # Controls whether to use a faster approximate SRGB-conversion (3x faster)
@@ -34,22 +35,6 @@ generate_wrong = True
 OriginalImage = NewType('OriginalImage', np.ndarray)
 DiffedImage = NewType('DiffedImage', np.ndarray)
 Prediction = tuple[tuple[int, int], float]
-
-
-_F = TypeVar('_F', bound=Callable)
-
-
-def timeit(func: _F) -> _F:
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        try:
-            return func(*args, **kwargs)
-        finally:
-            end = time.perf_counter()
-            span = end - start
-            print(f'{func.__name__}: {span:.2f} s')
-    return wrapper # type: ignore
 
 
 def load_labels(path: Path) -> set[tuple[int, int]]:
