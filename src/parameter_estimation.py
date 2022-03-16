@@ -1,10 +1,13 @@
 from dataclasses import dataclass
 import numpy as np
+import warnings
+
+from process import ValidationResult
 
 @dataclass
 class SentinelData:
-  channel_dt_s_arr =  np.array([0.507, 0.498])          # Time difference between channels 2-3 and 3-4
-  channel_resolution_m_arr = 10 * np.ones(3, dtype=int) # Channel 2, 3 and 4 has an accuracy of 10 m
+  channel_dt_s_arr          =  np.array([0.507, 0.498])  # Time difference between channels 2-3 and 3-4
+  channel_resolution_m_arr  = 10 * np.ones(3, dtype=int) # Channel 2, 3 and 4 has an accuracy of 10 m
 
   # Data assumed about the satellite - haven't found better parameters
   sentinel_lat_deg          = 50.042677   # [deg]
@@ -12,6 +15,7 @@ class SentinelData:
   sentinel_height_m         = 786000      # [m]
   sentinel_abs_vel          = 7460        # [m/s]
 
+  # Unsure if these are useful at all!
   __sentinel_angle_vel_x = np.sin(
     np.deg2rad(
       90 - sentinel_inclination_deg
@@ -44,11 +48,21 @@ class EstimateAircraftParameters:
     self.__invalid_heading = -1.0
 
   def display_estimates(self):
+    if self.__estimated_heading is None:
+      estimated_heading_deg = None
+    else:
+      estimated_heading_deg = self.__estimated_heading * 180 / np.pi
+
     print("Estimated velocity: {} [m/s]".format(self.__estimated_velocity))
     print("Estimated height: {} [m]".format(self.__estimated_height))
-    print("Estimated heading: {} [deg]".format(self.__estimated_heading * 180 / np.pi))
+    print("Estimated velocity: {} [deg]".format(estimated_heading_deg))
 
-  def estimate_parameters(self, cropped_image) -> tuple:
+  def estimate_parameters(
+        self, 
+        image       : np.ndarray,
+        diffed      : np.ndarray,
+        validation  : ValidationResult
+      ) -> tuple:
     """
     Tries to estimate an aircraft's velocity, height and heading
 
@@ -56,9 +70,13 @@ class EstimateAircraftParameters:
 
     Output: Tuple containing (velocity, height, heading) 
     """
-    intensities, indeces, coordinates = self.__extract_parameters(cropped_image=cropped_image) 
+    intensities, coordinates = self.__extract_parameters(
+      image=image,
+      diffed=diffed,
+      validation=validation
+    ) 
 
-    if intensities is None or indeces is None:
+    if intensities is None:
       # Not enough information
       return self.__invalid()
 
@@ -66,7 +84,9 @@ class EstimateAircraftParameters:
     # of each channel matches the ground. This is not really the case when the aircraft has
     # an altitude greater than 0 
     num_measurements = coordinates.shape[1]
-    assert num_measurements >= 2, "Need at least two measurements to calculate the velocity"
+    if num_measurements < 2:
+      warnings.warn("Need at least two measurements to calculate the parameters")
+      return self.__invalid()
 
     # Calculating the change in distance between the channels
     delta_pos = np.zeros((2, num_measurements - 1))
@@ -104,6 +124,7 @@ class EstimateAircraftParameters:
 
     # Validating if incorrect angle
     if theta == self.__invalid_heading:
+      warnings.warn("Invalid heading")
       return self.__invalid()
 
     # Calculate the velocity and altitude of the aircraft
@@ -114,20 +135,51 @@ class EstimateAircraftParameters:
     self.__estimated_height = h_aircraft_hat
     self.__estimated_heading = theta
 
-    return self.__estimated_velocity, self.__estimated_height, self.__estimated_heading
+    # Save found data
+    self.__save_parameters()
 
+    return self.__estimated_velocity, self.__estimated_height, self.__estimated_heading
   
-  def __extract_parameters(self, cropped_image) -> tuple:
+  def __extract_parameters(
+      self, 
+      image       : np.ndarray,
+      diffed      : np.ndarray,
+      validation  : ValidationResult
+    ) -> tuple:
     """
-    Tries to extract the intensities and indices for the different
-    channel-intensities  
+    Tries to extract the intensities for the different
+    channel-intensities, as well as the channel-coordinates 
+    in [row, col]^T
+    
+    images will be given as ndarray: [row, col, color]
+    b, g, r = 0, 1, 2
     """
-    return None, None, None
+    radius = validation.radius
+    self.__num_channels = image.shape[2]
+
+    # Set memory
+    intensities = np.zeros((self.__num_channels, 2*radius + 1, 2*radius + 1))
+    coordinates = np.zeros((2, self.__num_channels))
+
+    # Extract data from the images
+    green_center = validation.green_center
+    blue_center = validation.blue_center
+    red_center = validation.red_center
+
+    # Images taken in order: blue - green - red
+    center_list = [blue_center, green_center, red_center]
+
+    for (idx, center) in enumerate(center_list):
+      row, col = center[1], center[0]
+      coordinates[:, idx] = np.array([row, col]).T
+
+      intensities[idx] = diffed[row - radius : row + radius, col - radius : col + radius, idx]
+
+    return intensities, coordinates
 
   def __calculate_aircraft_heading(
       self,
-      channel_intensities : np.ndarray, 
-      indeces             : np.ndarray
+      channel_intensities : np.ndarray
     ) -> float:
     """
     Estimates the aircraft's heading based on the weighted covariance 
@@ -145,19 +197,18 @@ class EstimateAircraftParameters:
     Output:
       Estimated aircraft heading in rad
     """
-    reflectance_arr = np.zeros(self.__num_channels)
+    num_channels = self.__num_channels
+    
+    reflectance_arr = np.zeros(num_channels)
     # Iterate over all measured intensities in the channel_intensities, 
     # and calculate channel reflectance
     # return -1.0 # Until the code is developed properly
 
-    num_channels = self.__num_channels
-
     for ch in range(num_channels):
       # Iterate over all indeces assumed relevant
       channel_resolution_m = self.__sentinel_data.channel_resolution_m_arr[ch]
-      for idx in indeces:
-        # Sum up the intensities at the channels 
-        pass
+      channel_intensity = np.sum(channel_intensities[ch].flatten(), axis=0)
+      reflectance_arr[ch] = channel_intensity
       
     # Calculate weighted center, covariances and estimated heading for each channel
     weighted_coordinates = np.zeros((2, num_channels))
@@ -168,18 +219,17 @@ class EstimateAircraftParameters:
       channel_reflectance = reflectance_arr[ch]
 
       if channel_reflectance <= self.__min_channel_reflectance:
+        warnings.warn("Invalid channel reflectance for channel {}".format(ch))
         return self.__invalid_heading
 
       # Weighted center
       x_bar = 0
       y_bar = 0
-      for idx in indeces:
-        # Sum up the weighted intensities at the channels 
-        # Unsure how these are set
-        x_idx = idx[0]
-        y_idx = idx[1]
-        x_bar += x_idx * channel_intensities[ch][x_idx, y_idx] # Unsure how these are given as parameters
-        y_bar += y_idx * channel_intensities[ch][x_idx, y_idx] # Unsure how these are given as parameters
+      (num_rows, num_cols) = channel_intensities[ch].shape[0]
+      for row in range(num_rows):
+        for col in range(num_cols):
+          x_bar += col * channel_intensities[ch, col, row] 
+          y_bar += row * channel_intensities[ch, col, row] 
       
       x_bar = x_bar * channel_resolution_m / channel_reflectance
       y_bar = y_bar * channel_resolution_m / channel_reflectance
@@ -190,14 +240,11 @@ class EstimateAircraftParameters:
       sigma_xx = 0
       sigma_xy = 0
       sigma_yy = 0
-      for idx in indeces:
-        # Sum up the weighted intensities at the channels 
-        # Unsure how these are set
-        x_idx = idx[0]
-        y_idx = idx[1]
-        sigma_xx += (x_idx**2) * channel_intensities[ch][x_idx, y_idx] # Unsure how these are given as parameters
-        sigma_xy += (x_idx * y_idx) * channel_intensities[ch][x_idx, y_idx] # Unsure how these are given as parameters
-        sigma_yy += (y_idx**2) * channel_intensities[ch][x_idx, y_idx] # Unsure how these are given as parameters
+      for row in range(num_rows):
+        for col in range(num_cols):
+          sigma_xx += (col**2) * channel_intensities[ch, col, row] 
+          sigma_xy += (col * row) * channel_intensities[ch, col, row] 
+          sigma_yy += (row**2) * channel_intensities[ch, col, row] 
       
       sigma_xx = sigma_xx * ((channel_resolution_m / channel_reflectance)**2) - (x_bar**2)
       sigma_xy = sigma_xy * ((channel_resolution_m / channel_reflectance)**2) - (x_bar * y_bar)
@@ -207,7 +254,7 @@ class EstimateAircraftParameters:
 
       # Estimated headings
       if sigma_xx**2 - sigma_yy**2 == 0:
-        # Not enough information from this channel
+        warnings.warn("Not enough information for channel {}".format(ch))
         return self.__invalid_heading
 
       heading_hat = 0.5 * np.arctan((2 * sigma_xy**2) / (sigma_xx**2 - sigma_yy**2))
@@ -226,6 +273,23 @@ class EstimateAircraftParameters:
     self.__estimated_height = None 
 
     return self.__estimated_velocity, self.__estimated_height, self.__estimated_heading
+
+  def __save_parameters(self) -> None:
+    file_name = "" # Implement this later
+
+    if self.__estimated_heading is None:
+      estimated_heading = None
+    else:
+      estimated_heading = self.__estimated_heading * 180 / np.pi
+
+    with open(file_name, 'w') as file:
+      file.write(
+        "Parameters: \t Values: \n Velocity: \t {} [m/s] \n Height: \t {} [m/s] \n Heading: {} [deg]".format(
+          self.__estimated_velocity,
+          self.__estimated_height,
+          estimated_heading
+        )
+      )
 
 if __name__ == '__main__':
   est_aircraft_params = EstimateAircraftParameters()
