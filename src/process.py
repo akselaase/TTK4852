@@ -63,7 +63,7 @@ def load_labels(path: Path) -> set[Coordinate]:
 
 
 @timeit
-def load_image(path) -> OriginalImage:
+def load_image(path, pad=True) -> OriginalImage:
     image = cv2.imread(str(path), cv2.IMREAD_COLOR) / 255.0
     image = srgb_to_linear(image, fast=fast_srgb_conv)
     image = np.pad(image, ((padding, padding), (padding, padding), (0, 0)))
@@ -197,6 +197,8 @@ def hightlight_predictions(image: OriginalImage, diffed: DiffedImage, correct: S
     ):
         return
 
+    diffed = diff_channels(image)
+
     if generate_highlights:
         painted = image.copy()
 
@@ -241,6 +243,16 @@ def distance(a,b):
 
 def is_between(a,c,b):
     return (distance(a,b) - 1 <= distance(a,c) + distance(c,b) and distance(a,c) + distance(c,b) <= distance(a,b) + 1) and (distance(a,c) - 3 <= distance(c,b) and distance(c,b) <= distance(a,c) + 3) and (distance(a,c) >= 3 and distance(c,b) >= 3)
+
+def valid(g, b, r):
+    scaling = 0.527 / (1.005 - 0.527) 
+    v_b_to_g = np.array(g) - np.array(b)
+    v_g_to_r = np.array(r) - np.array(g)
+
+    mismatch = np.sqrt(np.sum((v_b_to_g - v_g_to_r * scaling) ** 2))
+    shortest_distance = np.minimum(np.sqrt(np.sum(v_b_to_g**2)), np.sqrt(np.sum(v_g_to_r**2)))
+    valid = mismatch < 3 and shortest_distance >= 2
+    return valid
 
 def print_values(a,c,b):
     print(distance(a,c))
@@ -291,7 +303,7 @@ def validate_prediction(
             break
 
     return ValidationResult(
-        valid=is_between(b,g,r),
+        valid=valid(g, b, r),
         green_center=(x, y),
         red_center=(0, 0), # todo: estimate position in red channel
         blue_center=(0, 0), # todo: estimate position in blue channel
