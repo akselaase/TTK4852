@@ -1,3 +1,4 @@
+from datetime import datetime
 import gc
 from itertools import count
 import multiprocessing
@@ -21,6 +22,9 @@ fast_srgb_conv = True
 # Controls whether we process images in parallel
 parallel_processing = False
 
+# Number of pixels to pad on each edge of the image
+padding = 64
+
 ### Controls whether to generate output images in the `output/` folder.
 
 # Flag to disable all image saving
@@ -41,12 +45,15 @@ DiffedImage = NewType('DiffedImage', np.ndarray)
 Prediction = tuple[tuple[int, int], float]
 
 
+output_path: Path
+
+
 def load_labels(path: Path) -> set[tuple[int, int]]:
     coords: set[tuple[int, int]] = set()
     with open(path) as f:
         for line in f:
             a, b = line.split(maxsplit=2)
-            coords.add((int(a), int(b)))
+            coords.add((int(a) + padding, int(b) + padding))
     return coords
 
 
@@ -54,7 +61,7 @@ def load_labels(path: Path) -> set[tuple[int, int]]:
 def load_image(path) -> OriginalImage:
     image = cv2.imread(str(path), cv2.IMREAD_COLOR) / 255.0
     image = srgb_to_linear(image, fast=fast_srgb_conv)
-    image = np.pad(image, ((32,32),(32,32),(0,0)))
+    image = np.pad(image, ((padding, padding), (padding, padding), (0, 0)))
     return image
 
 
@@ -165,7 +172,7 @@ def save_prediction(image, center: tuple[int, int], image_name: str) -> None:
     size = 32
     lx, hx, ly, hy = rect(*center, size)
     cropped = image[lx:hx, ly:hy,:]
-    save_image(cropped, f'output/{image_name}.png')
+    save_image(cropped, output_path / f'{image_name}.png')
 
 
 def paint_rect(image: OriginalImage, center: tuple[int, int], color: np.ndarray) -> None:
@@ -208,7 +215,7 @@ def hightlight_predictions(image: OriginalImage, diffed: DiffedImage, correct: S
             paint_rect(painted, lbl, np.array([0, 1, 1]))
     
     if generate_highlights:
-        save_image(painted, f'output/{image_name}_painted.png')
+        save_image(painted, output_path / f'{image_name}_painted.png')
 
 
 def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
@@ -445,7 +452,8 @@ def test_dataset(dir: Path):
     image_label_pairs = load_dataset_paths(dir, True)
     print(f'Found {len(image_label_pairs)} images.')
 
-    Path('output').mkdir(exist_ok=True)
+    output_path = Path('output') / (datetime.now().isoformat(timespec='seconds') + f'-{dir.name}')
+    output_path.mkdir(exist_ok=True)
 
     # Sort by smallest filesize first
     image_label_pairs.sort(key=lambda pair: pair[0].stat().st_size)
