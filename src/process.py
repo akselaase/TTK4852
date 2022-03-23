@@ -13,7 +13,7 @@ from lib.timeit import timeit
 
 
 # Controls whether to use a faster approximate SRGB-conversion (3x faster)
-fast_srgb_conv = False
+fast_srgb_conv = True
 
 # Controls whether we process images in parallel
 parallel_processing = False
