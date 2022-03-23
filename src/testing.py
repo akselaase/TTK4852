@@ -1,7 +1,5 @@
-from matplotlib.font_manager import findSystemFonts
 import numpy as np
 import matplotlib.pyplot as plt
-from pyparsing import And # type: ignore
 from process import find_bright_pixels, save_image, load_image
 import math
 
@@ -15,9 +13,9 @@ def main():
     image_G = image[:, :, 1]
     image_R = image[:, :, 2]
 
-    diff_B = diffed[:, :, 0]
-    diff_G = diffed[:, :, 1]
-    diff_R = diffed[:, :, 2]
+    image_B = diffed[:, :, 0]
+    image_G = diffed[:, :, 1]
+    image_R = diffed[:, :, 2]
 
     green_channel = diffed[:, :, 1]
     g = np.unravel_index(np.argmax(green_channel), green_channel.shape)

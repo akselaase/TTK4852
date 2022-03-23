@@ -1,3 +1,4 @@
+from datetime import datetime
 import gc
 from itertools import count
 import multiprocessing
@@ -6,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NewType, Sequence, cast
 
-import cv2  # type: ignore
+import cv2 # type: ignore
 import numpy as np
 import math
 
@@ -15,10 +16,13 @@ from lib.timeit import timeit
 
 
 # Controls whether to use a faster approximate SRGB-conversion (3x faster)
-fast_srgb_conv = False
+fast_srgb_conv = True
 
 # Controls whether we process images in parallel
 parallel_processing = False
+
+# Number of pixels to pad on each edge of the image
+padding = 64
 
 ### Controls whether to generate output images in the `output/` folder.
 
@@ -40,12 +44,15 @@ DiffedImage = NewType('DiffedImage', np.ndarray)
 Prediction = tuple[tuple[int, int], float]
 
 
+output_path: Path
+
+
 def load_labels(path: Path) -> set[tuple[int, int]]:
     coords: set[tuple[int, int]] = set()
     with open(path) as f:
         for line in f:
             a, b = line.split(maxsplit=2)
-            coords.add((int(a) + 32, int(b) + 32))
+            coords.add((int(a) + padding, int(b) + padding))
     return coords
 
 
@@ -53,8 +60,7 @@ def load_labels(path: Path) -> set[tuple[int, int]]:
 def load_image(path, pad=True) -> OriginalImage:
     image = cv2.imread(str(path), cv2.IMREAD_COLOR) / 255.0
     image = srgb_to_linear(image, fast=fast_srgb_conv)
-    if pad:
-        image = np.pad(image, ((32,32),(32,32),(0,0)))
+    image = np.pad(image, ((padding, padding), (padding, padding), (0, 0)))
     return image
 
 
@@ -165,7 +171,7 @@ def save_prediction(image, center: tuple[int, int], image_name: str) -> None:
     size = 32
     lx, hx, ly, hy = rect(*center, size)
     cropped = image[lx:hx, ly:hy,:]
-    save_image(cropped, f'output.new/{image_name}.png')
+    save_image(cropped, output_path / f'{image_name}.png')
 
 
 def paint_rect(image: OriginalImage, center: tuple[int, int], color: np.ndarray) -> None:
@@ -210,7 +216,7 @@ def hightlight_predictions(image: OriginalImage, diffed: DiffedImage, correct: S
             paint_rect(painted, lbl, np.array([0, 1, 1]))
     
     if generate_highlights:
-        save_image(painted, f'output.new/{image_name}_painted.png')
+        save_image(painted, output_path / f'{image_name}_painted.png')
 
 
 def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
@@ -342,12 +348,17 @@ def categorize_predictions(
     return correct, wrong, labels
 
 
-def find_planes(image: OriginalImage, diffed: DiffedImage, n: int, clear_radius: int) -> list[Prediction]:
+def find_planes(
+    image: OriginalImage,
+    diffed: DiffedImage,
+    n: int,
+    clear_radius: int
+) -> tuple[list[Prediction], list[ValidationResult]]:
     """Find `n` planes in the given image, clearing an square of 
     `clear_radius` side for each detection."""
-
     iteration_limit = 40 * n
     predictions: list[Prediction] = []
+    validations: list[ValidationResult] = []
 
     # Iterate until we've found enough planes
     # (or hit the maximum iteration limit).
@@ -358,7 +369,7 @@ def find_planes(image: OriginalImage, diffed: DiffedImage, n: int, clear_radius:
         validation = validate_prediction(image, diffed, pred)
         if validation.valid:
             predictions.append(pred)
-            # do_parameter_estimation(image, diffed, validation)
+            validations.append(validation)
         
         # Clear region anyway to avoid searching this area again.
         # (might discard planes nearby, but oh well...)
@@ -368,7 +379,7 @@ def find_planes(image: OriginalImage, diffed: DiffedImage, n: int, clear_radius:
         if iteration_limit == 0:
             break
 
-    return predictions
+    return predictions, validations
 
 
 @dataclass
@@ -376,22 +387,29 @@ class ImageResults:
     num_correct: int
     num_total: int
     predictions: tuple[Prediction, ...]
+    validations: tuple[ValidationResult, ...]
     labels: tuple[tuple[int, int], ...]
     correct: tuple[Prediction, ...]
     wrong: tuple[Prediction, ...]
     remaining_labels: tuple[tuple[int, int], ...]
 
 
-def test_image_predictions(image: OriginalImage, diffed: DiffedImage, labels: set[tuple[int, int]], radius: int) -> ImageResults:
+def test_image_predictions(
+    image: OriginalImage,
+    diffed: DiffedImage,
+    labels: set[tuple[int, int]],
+    radius: int
+) -> ImageResults:
     n_labels = len(labels)
 
-    predictions = find_planes(image, diffed, n=n_labels, clear_radius=radius)
+    predictions, validations = find_planes(image, diffed, n=n_labels, clear_radius=radius)
     correct, wrong, remaining_labels = categorize_predictions(predictions, labels, max_dist=radius)
 
     return ImageResults(
         num_correct=len(correct),
         num_total=n_labels,
         predictions=tuple(predictions),
+        validations=tuple(validations),
         labels=tuple(labels),
         correct=tuple(correct),
         wrong=tuple(wrong),
@@ -423,6 +441,10 @@ def evaluate_dataset_entry(pair: tuple[Path, Path]) -> tuple[int, int]:
             print(f'    Labels: {res.labels}')
             print(f'    Predictions: {res.predictions}')
 
+        for validation_result in res.validations:
+            # do_parameter_est(image, diffed, validation_result, f'{png.stem}_parameters.txt')
+            pass
+
         hightlight_predictions(image, diffed, res.correct, res.wrong, res.remaining_labels, png.stem)
 
     gc.collect()
@@ -435,7 +457,8 @@ def test_dataset(dir: Path):
     image_label_pairs = load_dataset_paths(dir, True)
     print(f'Found {len(image_label_pairs)} images.')
 
-    Path('output.new').mkdir(exist_ok=True)
+    output_path = Path('output') / (datetime.now().isoformat(timespec='seconds') + f'-{dir.name}')
+    output_path.mkdir(exist_ok=True)
 
     # Sort by smallest filesize first
     image_label_pairs.sort(key=lambda pair: pair[0].stat().st_size)
