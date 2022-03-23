@@ -1,25 +1,38 @@
 import numpy as np
-import matplotlib.pyplot as plt # type: ignore
-from process import save_image, load_image
+from process import ValidationResult, save_image, load_image
+from parameter_estimation import do_parameter_est
 
 def main():
-    image = load_image('output.bak/2020-01-10-10-36-57_image_correct0.png')
-    diffed = load_image('output.bak/2020-01-10-10-36-57_image_correct0_diff.png')
+    import os 
+    import sys
+
+    # image = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-20-10-36-56_image_correct2.png'))
+    # diffed = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-20-10-36-56_image_correct2_diff.png'))
+    image = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-10-10-36-57_image_correct0.png'))
+    diffed = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-10-10-36-57_image_correct0_diff.png'))
     
-    image_B = image[:, :, 0]
-    image_G = image[:, :, 1]
-    image_R = image[:, :, 2]
 
-    diff_B = diffed[:, :, 0]
-    diff_G = diffed[:, :, 1]
-    diff_R = diffed[:, :, 2]
+    image_B = diffed[:, :, 0]
+    image_G = diffed[:, :, 1]
+    image_R = diffed[:, :, 2]
 
-    cr, cc = (image.shape[0] // 2, image.shape[1] // 2)
+    brighest_green = (image.shape[0] // 2, image.shape[1] // 2)
+    brightest_blue = np.unravel_index(np.argmax(image_B), image_B.shape)
+    brightest_red = np.unravel_index(np.argmax(image_R), image_R.shape)
 
-    cr, cc = np.unravel_index(np.argmax(diff_B), diff_B.shape)
-    bright_blue = image_B >= (0.50 * image_B[cr, cc])
-    image_R[bright_blue] = 1
-    save_image(image, 'tmp.png')
+    image_B[brightest_red[0], brightest_red[1]] = 1
+    image_R[brightest_blue[0], brightest_blue[1]] = 1
+    save_image(diffed, 'tmp.png')
+
+    result = ValidationResult(
+        valid=True,
+        green_center=brighest_green,
+        blue_center=brightest_blue,
+        red_center=brightest_red,
+        radius=15
+    )
+
+    do_parameter_est(image, diffed, result, "parameters.txt")
 
     plt.plot(image_B[cr, :], label='Original row')
     plt.plot(image_B[:, cc], label='Original column')
