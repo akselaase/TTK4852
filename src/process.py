@@ -14,6 +14,7 @@ import math
 
 from lib.color import linear_to_srgb, srgb_to_linear
 from lib.timeit import timeit
+from lib.weighted_center import weighted_center
 
 
 # Controls whether to use a faster approximate SRGB-conversion (3x faster)
@@ -24,6 +25,9 @@ parallel_processing = False
 
 # Number of pixels to pad on each edge of the image
 padding = 64
+
+# Minimum original green pixel intensity
+threshold = 0.1
 
 ### Controls whether to generate output images in the `output/` folder.
 
@@ -42,14 +46,15 @@ generate_wrong = True
 
 OriginalImage = NewType('OriginalImage', np.ndarray)
 DiffedImage = NewType('DiffedImage', np.ndarray)
-Prediction = tuple[tuple[int, int], float]
+Coordinate = tuple[int, int]
+Prediction = tuple[Coordinate, float]
 
 
 output_path: Path
 
 
-def load_labels(path: Path) -> set[tuple[int, int]]:
-    coords: set[tuple[int, int]] = set()
+def load_labels(path: Path) -> set[Coordinate]:
+    coords: set[Coordinate] = set()
     with open(path) as f:
         for line in f:
             a, b = line.split(maxsplit=2)
@@ -100,10 +105,10 @@ def find_bright_pixels(image: OriginalImage, threshold: float, best_n: int) -> l
     np_indices = np.argwhere(bright_greens)
 
     # Change data type from np arrays to tuples
-    indices: list[tuple[int, int]] = \
+    indices: list[Coordinate] = \
         list(map(lambda idx: (idx[0], idx[1]), np_indices))
     # Pair each index with its green pixel value
-    pairs: list[tuple[tuple[int, int], float]] = \
+    pairs: list[Prediction] = \
          list(map(lambda idx: (idx, diffed[idx[0], idx[1], 1]), indices))
 
     # Return brightest indices 
@@ -137,7 +142,7 @@ def load_dataset_paths(dir, recursive: bool = True) -> list[tuple[Path, Path]]:
     return pairs
 
 
-def evaluate_prediction(prediction: tuple[int, int], labels: set[tuple[int, int]]) -> tuple[tuple[int, int], float]:
+def evaluate_prediction(prediction: Coordinate, labels: set[Coordinate]) -> tuple[Coordinate, float]:
     """Loop through all labels and find the closest one."""
 
     if not labels:
@@ -146,7 +151,7 @@ def evaluate_prediction(prediction: tuple[int, int], labels: set[tuple[int, int]
     x, y = prediction
 
     min_dist = np.inf
-    label: tuple[int, int] = None # type: ignore
+    label: Coordinate = None # type: ignore
 
     # Find the closest label by Pythagorean distance
     for (lx, ly) in labels:
@@ -159,33 +164,33 @@ def evaluate_prediction(prediction: tuple[int, int], labels: set[tuple[int, int]
     return (label, min_dist)
 
 
-def rect(cx: int, cy: int, size: int) -> tuple[int, int, int, int]:
+def rect(cx: int, cy: int, radius: int, image: np.ndarray) -> tuple[int, int, int, int]:
     """Turn a center coordinate and side length into
     a tuple of two of the corners of the rectangle."""
     return (
-        max(0, cx - size), cx + size + 1,
-        max(0, cy - size), cy + size + 1
+        max(0, cx - radius), min(image.shape[0], cx + radius + 1),
+        max(0, cy - radius), min(image.shape[1], cy + radius + 1)
     )
 
 
-def save_prediction(image, center: tuple[int, int], image_name: str) -> None:
+def save_prediction(image, center: Coordinate, image_name: str) -> None:
     size = 32
-    lx, hx, ly, hy = rect(*center, size)
+    lx, hx, ly, hy = rect(*center, size, image)
     cropped = image[lx:hx, ly:hy,:]
     save_image(cropped, output_path / f'{image_name}.png')
 
 
-def paint_rect(image: OriginalImage, center: tuple[int, int], color: np.ndarray) -> None:
+def paint_rect(image: OriginalImage, center: Coordinate, color: np.ndarray) -> None:
     size = 32
     width = 2
-    lx, hx, ly, hy = rect(*center, size + width)
+    lx, hx, ly, hy = rect(*center, size + width, image)
     image[lx:hx, ly:ly+width+1, :] = color
     image[lx:hx, hy:hy+width+1, :] = color
     image[lx:lx+width+1, ly:hy, :] = color
     image[hx:hx+width+1, ly:hy, :] = color
 
 
-def hightlight_predictions(image: OriginalImage, diffed: DiffedImage, correct: Sequence[Prediction], wrong: Sequence[Prediction], labels: Sequence[tuple[int, int]], image_name: str):
+def hightlight_predictions(image: OriginalImage, diffed: DiffedImage, correct: Sequence[Prediction], wrong: Sequence[Prediction], labels: Sequence[Coordinate], image_name: str):
     if not (
         generate_wrong or generate_correct or 
         generate_missed or generate_highlights
@@ -218,16 +223,17 @@ def hightlight_predictions(image: OriginalImage, diffed: DiffedImage, correct: S
         save_image(painted, output_path / f'{image_name}_painted.png')
 
 
-def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
+def clear_region(diffed: DiffedImage, center: Coordinate, radius: int) -> None:
+    x, y = center
     diffed[x-radius:x+radius, y-radius:y+radius, 1] = 0
 
 
 @dataclass
 class ValidationResult:
     valid: bool
-    green_center: tuple[int, int]
-    red_center: tuple[int, int]
-    blue_center: tuple[int, int]
+    green_center: Coordinate
+    red_center: Coordinate
+    blue_center: Coordinate
     radius: float
 
 def distance(a,b):
@@ -245,14 +251,14 @@ def print_values(a,c,b):
 def validate_prediction(
     image: OriginalImage,
     diffed: DiffedImage,
-    pred: Prediction
+    coord: Coordinate
 ) -> ValidationResult:
     """Perform validation on the given prediction
     and return some estimates about the plane."""
-    (x, y), _ = pred
+    x, y = coord
 
     size = 32
-    lx, hx, ly, hy = rect(x,y, size)
+    lx, hx, ly, hy = rect(x, y, size, image)
     cropped = image[lx:hx, ly:hy,:]
     cropped_diffed = diffed[lx:hx, ly:hy,:]
 
@@ -260,40 +266,30 @@ def validate_prediction(
     image_G = cropped[:, :, 1]
     image_R = cropped[:, :, 2]
 
-    blue_channel = cropped_diffed[:, :, 0]
+    diff_B = cropped_diffed[:, :, 0]
     diff_G = cropped_diffed[:, :, 1]
-    red_channel = cropped_diffed[:, :, 2]
+    diff_R = cropped_diffed[:, :, 2]
 
-    green_channel = cropped_diffed[:, :, 1]
-    g = np.unravel_index(np.argmax(green_channel), green_channel.shape)
+    g = np.unravel_index(np.argmax(diff_G), diff_G.shape)
 
-    blue_channel = cropped_diffed[:, :, 0]
-    b = np.unravel_index(np.argmax(blue_channel), blue_channel.shape)
+    diff_B = cropped_diffed[:, :, 0]
+    b = np.unravel_index(np.argmax(diff_B), diff_B.shape)
 
-    red_channel = cropped_diffed[:, :, 2]
-    r = np.unravel_index(np.argmax(red_channel), red_channel.shape)
+    diff_R = cropped_diffed[:, :, 2]
+    r = np.unravel_index(np.argmax(diff_R), diff_R.shape)
 
     while distance(g, b) > 15:
-        blue_channel[b] = 0
-        b = np.unravel_index(np.argmax(blue_channel), blue_channel.shape)
+        diff_B[b] = 0
+        b = np.unravel_index(np.argmax(diff_B), diff_B.shape)
         if b == (0,0):
             break
 
     while distance(g, r) > 15:
-        red_channel[r] = 0
-        r = np.unravel_index(np.argmax(red_channel), red_channel.shape)
+        diff_R[r] = 0
+        r = np.unravel_index(np.argmax(diff_R), diff_R.shape)
         if r == (0,0):
             break
 
-    # Use the pixel coordinates, diffed pixel value, and optionally data from
-    # `image` and `diffed` to evaluate whether this is a false positive or not.
-
-    # Get the original BGR color like this for instance:
-    # `b, g, r = image[x, y, :]`
-    # And filtered BGR color like this:
-    # `b, g, r = diffed[x, y, :]`
-
-    # Return False if this is a false positive.
     return ValidationResult(
         valid=is_between(b,g,r),
         green_center=(x, y),
@@ -312,12 +308,12 @@ def find_plane(diffed: DiffedImage) -> Prediction:
 
 def categorize_predictions(
     predictions: list[Prediction],
-    labels: set[tuple[int, int]],
+    labels: set[Coordinate],
     max_dist: float
 ) -> tuple[
     list[Prediction], # correct predictions
     list[Prediction], # wrong predictions
-    set[tuple[int, int]] # remaining labels
+    set[Coordinate] # remaining labels
 ]:
     labels = set(labels)
     correct: list[Prediction] = []
@@ -339,33 +335,34 @@ def categorize_predictions(
 def find_planes(
     image: OriginalImage,
     diffed: DiffedImage,
-    n: int,
     clear_radius: int
 ) -> tuple[list[Prediction], list[ValidationResult]]:
     """Find `n` planes in the given image, clearing an square of 
     `clear_radius` side for each detection."""
-    iteration_limit = 40 * n
     predictions: list[Prediction] = []
     validations: list[ValidationResult] = []
 
-    # Iterate until we've found enough planes
-    # (or hit the maximum iteration limit).
-    while len(predictions) < n:
-        pred = find_plane(diffed)
-        (x, y), _ = pred
+    X, Y = np.nonzero(image[:, :, 1] >= threshold)
+    values = image[X, Y, 1]
 
-        validation = validate_prediction(image, diffed, pred)
-        if validation.valid:
-            predictions.append(pred)
-            validations.append(validation)
+    # Sort by descending intensity
+    sorted_indices = values.argsort()[::-1]
+    X, Y = X[sorted_indices], Y[sorted_indices]
+    visited = np.zeros(image.shape[:2], dtype=bool)
+
+    # Iterate through all pixels matching the threshold
+    # in descending order of intensity
+    for coord in zip(X, Y):
+        if visited[coord]:
+            continue
         
-        # Clear region anyway to avoid searching this area again.
-        # (might discard planes nearby, but oh well...)
-        clear_region(diffed, x, y, clear_radius)
-
-        iteration_limit -= 1
-        if iteration_limit == 0:
-            break
+        lx, hx, ly, hy = rect(*coord, clear_radius, image)
+        visited[lx:hx, ly:hy] = 1
+        
+        validation = validate_prediction(image, diffed, coord)
+        if validation.valid:
+            predictions.append(coord)
+            validations.append(validation)
 
     return predictions, validations
 
@@ -376,21 +373,21 @@ class ImageResults:
     num_total: int
     predictions: tuple[Prediction, ...]
     validations: tuple[ValidationResult, ...]
-    labels: tuple[tuple[int, int], ...]
+    labels: tuple[Coordinate, ...]
     correct: tuple[Prediction, ...]
     wrong: tuple[Prediction, ...]
-    remaining_labels: tuple[tuple[int, int], ...]
+    remaining_labels: tuple[Coordinate, ...]
 
 
 def test_image_predictions(
     image: OriginalImage,
     diffed: DiffedImage,
-    labels: set[tuple[int, int]],
+    labels: set[Coordinate],
     radius: int
 ) -> ImageResults:
     n_labels = len(labels)
 
-    predictions, validations = find_planes(image, diffed, n=n_labels, clear_radius=radius)
+    predictions, validations = find_planes(image, diffed, clear_radius=radius)
     correct, wrong, remaining_labels = categorize_predictions(predictions, labels, max_dist=radius)
 
     return ImageResults(
