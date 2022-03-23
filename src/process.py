@@ -7,6 +7,7 @@ from typing import NewType, Sequence, cast
 
 import cv2  # type: ignore
 import numpy as np
+import matplotlib.pyplot as plt # type: ignore
 
 from lib.color import linear_to_srgb, srgb_to_linear
 from lib.timeit import timeit
@@ -340,6 +341,9 @@ def test_image_predictions(image: OriginalImage, labels: set[tuple[int, int]], r
     )
 
 
+pixel_value_distribution: list[float] = []
+pixel_value_distribution_diff: list[float] = []
+
 def evaluate_dataset_entry(pair: tuple[Path, Path]) -> tuple[int, int]:
     png, txt = pair
 
@@ -353,6 +357,11 @@ def evaluate_dataset_entry(pair: tuple[Path, Path]) -> tuple[int, int]:
             print(f'{png.name} ({png.stat().st_size / 1024**2:.1f} MiB): ', end='')
 
         image = load_image(png)
+        diffed = diff_channels(image)   
+
+        for (x, y) in labels:
+            pixel_value_distribution.append(image[x, y, 1])
+            pixel_value_distribution_diff.append(diffed[x, y, 1])
 
         res = test_image_predictions(image, labels, radius=5)
         n_correct = res.num_correct
@@ -385,6 +394,19 @@ def test_dataset(dir: Path):
             res = pool.map(evaluate_dataset_entry, image_label_pairs)
     else:
         res = list(map(evaluate_dataset_entry, image_label_pairs))
+
+    pixel_value_distribution.sort()
+    pixel_value_distribution_diff.sort()
+    x = np.linspace(0, 1, len(pixel_value_distribution))
+    plt.plot(x, pixel_value_distribution, label='Pre-filter intensitet')
+    plt.plot(x, pixel_value_distribution_diff, label='Post-filter intensitet')
+    residue_abs = np.array(pixel_value_distribution) - np.array(pixel_value_distribution_diff)
+    residue_rel = residue_abs / np.array(pixel_value_distribution)
+    plt.plot(x, residue_abs, '--', label='Absolutt filter tap')
+    plt.plot(x, residue_rel, '--', label='Relativt filter tap')
+    plt.legend()
+    plt.title('Intensitetsfordeling (grønn kanal)')
+    plt.savefig('pixel_intensity_distribution.pdf')
     
     sum_correct = 0
     sum_total = 0
