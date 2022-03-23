@@ -1,4 +1,5 @@
 import gc
+from itertools import count
 import multiprocessing
 import sys
 from dataclasses import dataclass
@@ -7,6 +8,7 @@ from typing import NewType, Sequence, cast
 
 import cv2  # type: ignore
 import numpy as np
+import math
 
 from lib.color import linear_to_srgb, srgb_to_linear
 from lib.timeit import timeit
@@ -161,7 +163,7 @@ def save_prediction(image, center: tuple[int, int], image_name: str) -> None:
     size = 32
     lx, hx, ly, hy = rect(*center, size)
     cropped = image[lx:hx, ly:hy,:]
-    save_image(cropped, f'output/{image_name}.png')
+    save_image(cropped, f'output.new/{image_name}.png')
 
 
 def paint_rect(image: OriginalImage, center: tuple[int, int], color: np.ndarray) -> None:
@@ -206,7 +208,7 @@ def hightlight_predictions(image: OriginalImage, correct: Sequence[Prediction], 
             paint_rect(painted, lbl, np.array([0, 1, 1]))
     
     if generate_highlights:
-        save_image(painted, f'output/{image_name}_painted.png')
+        save_image(painted, f'output.new/{image_name}_painted.png')
 
 
 def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
@@ -221,6 +223,17 @@ class ValidationResult:
     blue_center: tuple[int, int]
     radius: float
 
+def distance(a,b):
+    return math.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2)
+
+def is_between(a,c,b):
+    return (distance(a,b) - 1 <= distance(a,c) + distance(c,b) and distance(a,c) + distance(c,b) <= distance(a,b) + 1) and (distance(a,c) - 3 <= distance(c,b) and distance(c,b) <= distance(a,c) + 3) and (distance(a,c) >= 3 and distance(c,b) >= 3)
+
+def print_values(a,c,b):
+    print(distance(a,c))
+    print(distance(c,b))
+    print(distance(a,c) + distance(c,b))
+    print(distance(a,b))
 
 def validate_prediction(
     image: OriginalImage,
@@ -230,6 +243,40 @@ def validate_prediction(
     """Perform validation on the given prediction
     and return some estimates about the plane."""
     (x, y), _ = pred
+
+    size = 32
+    lx, hx, ly, hy = rect(x,y, size)
+    cropped = image[lx:hx, ly:hy,:]
+    cropped_diffed = diffed[lx:hx, ly:hy,:]
+
+    image_B = cropped[:, :, 0]
+    image_G = cropped[:, :, 1]
+    image_R = cropped[:, :, 2]
+
+    blue_channel = cropped_diffed[:, :, 0]
+    diff_G = cropped_diffed[:, :, 1]
+    red_channel = cropped_diffed[:, :, 2]
+
+    green_channel = cropped_diffed[:, :, 1]
+    g = np.unravel_index(np.argmax(green_channel), green_channel.shape)
+
+    blue_channel = cropped_diffed[:, :, 0]
+    b = np.unravel_index(np.argmax(blue_channel), blue_channel.shape)
+
+    red_channel = cropped_diffed[:, :, 2]
+    r = np.unravel_index(np.argmax(red_channel), red_channel.shape)
+
+    while distance(g, b) > 15:
+        blue_channel[b] = 0
+        b = np.unravel_index(np.argmax(blue_channel), blue_channel.shape)
+        if b == (0,0):
+            break
+
+    while distance(g, r) > 15:
+        red_channel[r] = 0
+        r = np.unravel_index(np.argmax(red_channel), red_channel.shape)
+        if r == (0,0):
+            break
 
     # Use the pixel coordinates, diffed pixel value, and optionally data from
     # `image` and `diffed` to evaluate whether this is a false positive or not.
@@ -241,7 +288,7 @@ def validate_prediction(
 
     # Return False if this is a false positive.
     return ValidationResult(
-        valid=True,
+        valid=is_between(b,g,r),
         green_center=(x, y),
         red_center=(0, 0), # todo: estimate position in red channel
         blue_center=(0, 0), # todo: estimate position in blue channel
@@ -375,7 +422,7 @@ def test_dataset(dir: Path):
     image_label_pairs = load_dataset_paths(dir, True)
     print(f'Found {len(image_label_pairs)} images.')
 
-    Path('output').mkdir(exist_ok=True)
+    Path('output.new').mkdir(exist_ok=True)
 
     # Sort by smallest filesize first
     image_label_pairs.sort(key=lambda pair: pair[0].stat().st_size)
@@ -393,8 +440,8 @@ def test_dataset(dir: Path):
         sum_total += n_total
 
     accuracy = sum_correct / sum_total
+    print(f'{sum_correct} / {sum_total}')
     print(f'{accuracy=}')
-
 
 def process_single_image(path: Path):
     image = load_image(path)
