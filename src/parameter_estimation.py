@@ -4,7 +4,7 @@ import numpy as np
 import warnings
 
 from pathlib import Path
-from process import ValidationResult
+from process import Prediction
 
 @dataclass
 class SentinelData:
@@ -63,7 +63,7 @@ class EstimateAircraftParameters:
         self, 
         image       : np.ndarray,
         diffed      : np.ndarray,
-        validation  : ValidationResult
+        prediction  : Prediction
       ) -> tuple:
     """
     Tries to estimate an aircraft's velocity, height and heading
@@ -75,7 +75,7 @@ class EstimateAircraftParameters:
     intensities, coordinates = self.__extract_parameters(
       image=image,
       diffed=diffed,
-      validation=validation
+      prediction=prediction
     ) 
 
     if intensities is None:
@@ -147,7 +147,7 @@ class EstimateAircraftParameters:
       self, 
       image       : np.ndarray,
       diffed      : np.ndarray,
-      validation  : ValidationResult
+      prediction  : Prediction
     ) -> tuple:
     """
     Tries to extract the intensities for the different
@@ -160,7 +160,7 @@ class EstimateAircraftParameters:
     Unsure how to include the raw image, and if it is usable
     at all?
     """
-    radius = validation.radius
+    radius = prediction.radius
     self.__num_channels = diffed.shape[2]
 
     # Set memory
@@ -168,9 +168,9 @@ class EstimateAircraftParameters:
     coordinates = np.zeros((2, self.__num_channels))
 
     # Extract data from the images
-    green_center = validation.green_center
-    blue_center = validation.blue_center
-    red_center = validation.red_center
+    green_center = prediction.green_center_f
+    blue_center = prediction.blue_center_f
+    red_center = prediction.red_center_f
 
     # Images taken in order: bgr
     center_list = [blue_center, green_center, red_center]
@@ -296,11 +296,11 @@ class EstimateAircraftParameters:
 def do_parameter_est(
       image     : np.ndarray,
       diffed    : np.ndarray,
-      validation: ValidationResult,
+      prediction: Prediction,
       filename  : str
     ) -> None:
   est_aircraft_params = EstimateAircraftParameters()
-  est_aircraft_params.estimate_parameters(image=image, diffed=diffed, validation=validation)
+  est_aircraft_params.estimate_parameters(image=image, diffed=diffed, prediction=prediction)
   est_aircraft_params.save_parameters(filename=filename)
 
 if __name__ == '__main__':
