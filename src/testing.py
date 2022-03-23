@@ -34,6 +34,13 @@ def main():
 
     do_parameter_est(image, diffed, result, "parameters.txt")
 
+    plt.plot(image_B[cr, :], label='Original row')
+    plt.plot(image_B[:, cc], label='Original column')
+    plt.plot(diff_B[cr, :], label='Diffed row')
+    plt.plot(diff_B[:, cc], label='Diffed column')
+    plt.legend()
+    plt.show()
+
 
 if __name__ == '__main__':
     main()

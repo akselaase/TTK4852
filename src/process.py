@@ -16,7 +16,7 @@ from lib.timeit import timeit
 fast_srgb_conv = False
 
 # Controls whether we process images in parallel
-parallel_processing = True
+parallel_processing = False
 
 ### Controls whether to generate output images in the `output/` folder.
 
