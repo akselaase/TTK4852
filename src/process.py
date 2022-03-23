@@ -1,3 +1,4 @@
+from datetime import datetime
 import gc
 from itertools import count
 import multiprocessing
@@ -12,6 +13,9 @@ import math
 
 from lib.color import linear_to_srgb, srgb_to_linear
 from lib.timeit import timeit
+
+
+output_path: Path
 
 
 # Controls whether to use a faster approximate SRGB-conversion (3x faster)
@@ -164,7 +168,7 @@ def save_prediction(image, center: tuple[int, int], image_name: str) -> None:
     size = 32
     lx, hx, ly, hy = rect(*center, size)
     cropped = image[lx:hx, ly:hy,:]
-    save_image(cropped, f'output.new/{image_name}.png')
+    save_image(cropped, output_path / f'{image_name}.png')
 
 
 def paint_rect(image: OriginalImage, center: tuple[int, int], color: np.ndarray) -> None:
@@ -207,7 +211,7 @@ def hightlight_predictions(image: OriginalImage, diffed: DiffedImage, correct: S
             paint_rect(painted, lbl, np.array([0, 1, 1]))
     
     if generate_highlights:
-        save_image(painted, f'output.new/{image_name}_painted.png')
+        save_image(painted, output_path / f'{image_name}_painted.png')
 
 
 def clear_region(diffed: DiffedImage, x: int, y: int, radius: int) -> None:
@@ -437,7 +441,8 @@ def test_dataset(dir: Path):
     image_label_pairs = load_dataset_paths(dir, True)
     print(f'Found {len(image_label_pairs)} images.')
 
-    Path('output.new').mkdir(exist_ok=True)
+    output_path = Path('output') / (datetime.now().isoformat(timespec='seconds') + f'-{dir.name}')
+    output_path.mkdir(exist_ok=True)
 
     # Sort by smallest filesize first
     image_label_pairs.sort(key=lambda pair: pair[0].stat().st_size)
