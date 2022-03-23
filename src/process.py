@@ -53,6 +53,7 @@ def load_labels(path: Path) -> set[tuple[int, int]]:
 def load_image(path) -> OriginalImage:
     image = cv2.imread(str(path), cv2.IMREAD_COLOR) / 255.0
     image = srgb_to_linear(image, fast=fast_srgb_conv)
+    image = np.pad(image, ((32,32),(32,32),(0,0)))
     return image
 
 
@@ -176,14 +177,12 @@ def paint_rect(image: OriginalImage, center: tuple[int, int], color: np.ndarray)
     image[hx:hx+width+1, ly:hy, :] = color
 
 
-def hightlight_predictions(image: OriginalImage, correct: Sequence[Prediction], wrong: Sequence[Prediction], labels: Sequence[tuple[int, int]], image_name: str):
+def hightlight_predictions(image: OriginalImage, diffed: DiffedImage, correct: Sequence[Prediction], wrong: Sequence[Prediction], labels: Sequence[tuple[int, int]], image_name: str):
     if not (
         generate_wrong or generate_correct or 
         generate_missed or generate_highlights
     ):
         return
-
-    diffed = diff_channels(image)
 
     if generate_highlights:
         painted = image.copy()
@@ -329,12 +328,11 @@ def categorize_predictions(
     return correct, wrong, labels
 
 
-def find_planes(image: OriginalImage, n: int, clear_radius: int) -> list[Prediction]:
+def find_planes(image: OriginalImage, diffed: DiffedImage, n: int, clear_radius: int) -> list[Prediction]:
     """Find `n` planes in the given image, clearing an square of 
     `clear_radius` side for each detection."""
-    diffed = diff_channels(image)
 
-    iteration_limit = 4 * n
+    iteration_limit = 40 * n
     predictions: list[Prediction] = []
 
     # Iterate until we've found enough planes
@@ -370,10 +368,10 @@ class ImageResults:
     remaining_labels: tuple[tuple[int, int], ...]
 
 
-def test_image_predictions(image: OriginalImage, labels: set[tuple[int, int]], radius: int) -> ImageResults:
+def test_image_predictions(image: OriginalImage, diffed: DiffedImage, labels: set[tuple[int, int]], radius: int) -> ImageResults:
     n_labels = len(labels)
 
-    predictions = find_planes(image, n=n_labels, clear_radius=radius)
+    predictions = find_planes(image, diffed, n=n_labels, clear_radius=radius)
     correct, wrong, remaining_labels = categorize_predictions(predictions, labels, max_dist=radius)
 
     return ImageResults(
@@ -400,8 +398,9 @@ def evaluate_dataset_entry(pair: tuple[Path, Path]) -> tuple[int, int]:
             print(f'{png.name} ({png.stat().st_size / 1024**2:.1f} MiB): ', end='')
 
         image = load_image(png)
+        diffed = diff_channels(image)
 
-        res = test_image_predictions(image, labels, radius=5)
+        res = test_image_predictions(image, diffed, labels, radius=5)
         n_correct = res.num_correct
         n_total = res.num_total
 
@@ -410,7 +409,7 @@ def evaluate_dataset_entry(pair: tuple[Path, Path]) -> tuple[int, int]:
             print(f'    Labels: {res.labels}')
             print(f'    Predictions: {res.predictions}')
 
-        hightlight_predictions(image, res.correct, res.wrong, res.remaining_labels, png.stem)
+        hightlight_predictions(image, diffed, res.correct, res.wrong, res.remaining_labels, png.stem)
 
     gc.collect()
     return (n_correct, n_total)
