@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NewType, Sequence, cast
 
-import cv2 
+import cv2 # type: ignore
 import numpy as np
 
 from lib.color import linear_to_srgb, srgb_to_linear
@@ -16,7 +16,7 @@ from lib.timeit import timeit
 fast_srgb_conv = False
 
 # Controls whether we process images in parallel
-parallel_processing = False
+parallel_processing = True
 
 ### Controls whether to generate output images in the `output/` folder.
 
@@ -49,7 +49,7 @@ def load_labels(path: Path) -> set[tuple[int, int]]:
 
 @timeit
 def load_image(path) -> OriginalImage:
-    image = cv2.imread(path) / 255.0
+    image = cv2.imread(str(path), cv2.IMREAD_COLOR) / 255.0
     image = srgb_to_linear(image, fast=fast_srgb_conv)
     return image
 
