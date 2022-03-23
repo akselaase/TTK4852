@@ -20,7 +20,7 @@ from lib.weighted_center import weighted_center
 fast_srgb_conv = True
 
 # Controls whether we process images in parallel
-parallel_processing = True
+parallel_processing = False
 
 # Number of pixels to pad on each edge of the image
 padding = 64
