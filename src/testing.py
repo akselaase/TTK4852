@@ -6,9 +6,10 @@ from process import find_bright_pixels, save_image, load_image
 import math
 
 def main():
-    image = load_image('output.new/2020-03-25-10-36-59_image_missed2.png')
-    diffed = load_image('output.new/2020-03-25-10-36-59_image_missed2_diff.png')
-
+    image = load_image('output.new/2020-06-03-10-37-09_image_wrong0.png', False)
+    diffed = load_image('output.new/2020-06-03-10-37-09_image_wrong0_diff.png', False)
+    # image = load_image('output.new/2020-05-18-10-14-23_image_wrong0.png', False)
+    # diffed = load_image('output.new/2020-05-18-10-14-23_image_wrong0_diff.png', False)
 
     image_B = image[:, :, 0]
     image_G = image[:, :, 1]
@@ -52,7 +53,26 @@ def main():
     diff_B[r] = 1
     diff_G[r] = 1
 
+    print(g)
+    print(b)
+    print(r)
+
     print(is_between(b,g,r))
+
+    # how much longer the blue->green line is than the green->red
+    scaling = 0.527 / (1.005 - 0.527) 
+    v_b_to_g = np.array(g) - np.array(b)
+    print(v_b_to_g)
+    v_g_to_r = np.array(r) - np.array(g)
+    print(v_g_to_r)
+
+    mismatch = np.sqrt(np.sum((v_b_to_g - v_g_to_r * scaling) ** 2))
+    shortest_distance = np.minimum(np.sqrt(np.sum(v_b_to_g**2)), np.sqrt(np.sum(v_g_to_r**2)))
+    valid = mismatch < 3 and shortest_distance >= 2
+
+    print(f'{mismatch=}')
+    print(f'{shortest_distance=}')
+    print(f'{valid=}')
 
     save_image(diffed, 'tmp.png')
 
