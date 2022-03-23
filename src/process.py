@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NewType, Sequence, cast
 
-import cv2  # type: ignore
+import cv2 # type: ignore
 import numpy as np
 import math
 
@@ -328,12 +328,17 @@ def categorize_predictions(
     return correct, wrong, labels
 
 
-def find_planes(image: OriginalImage, diffed: DiffedImage, n: int, clear_radius: int) -> list[Prediction]:
+def find_planes(
+    image: OriginalImage,
+    diffed: DiffedImage,
+    n: int,
+    clear_radius: int
+) -> tuple[list[Prediction], list[ValidationResult]]:
     """Find `n` planes in the given image, clearing an square of 
     `clear_radius` side for each detection."""
-
     iteration_limit = 40 * n
     predictions: list[Prediction] = []
+    validations: list[ValidationResult] = []
 
     # Iterate until we've found enough planes
     # (or hit the maximum iteration limit).
@@ -344,7 +349,7 @@ def find_planes(image: OriginalImage, diffed: DiffedImage, n: int, clear_radius:
         validation = validate_prediction(image, diffed, pred)
         if validation.valid:
             predictions.append(pred)
-            # do_parameter_estimation(image, diffed, validation)
+            validations.append(validation)
         
         # Clear region anyway to avoid searching this area again.
         # (might discard planes nearby, but oh well...)
@@ -354,7 +359,7 @@ def find_planes(image: OriginalImage, diffed: DiffedImage, n: int, clear_radius:
         if iteration_limit == 0:
             break
 
-    return predictions
+    return predictions, validations
 
 
 @dataclass
@@ -362,22 +367,29 @@ class ImageResults:
     num_correct: int
     num_total: int
     predictions: tuple[Prediction, ...]
+    validations: tuple[ValidationResult, ...]
     labels: tuple[tuple[int, int], ...]
     correct: tuple[Prediction, ...]
     wrong: tuple[Prediction, ...]
     remaining_labels: tuple[tuple[int, int], ...]
 
 
-def test_image_predictions(image: OriginalImage, diffed: DiffedImage, labels: set[tuple[int, int]], radius: int) -> ImageResults:
+def test_image_predictions(
+    image: OriginalImage,
+    diffed: DiffedImage,
+    labels: set[tuple[int, int]],
+    radius: int
+) -> ImageResults:
     n_labels = len(labels)
 
-    predictions = find_planes(image, diffed, n=n_labels, clear_radius=radius)
+    predictions, validations = find_planes(image, diffed, n=n_labels, clear_radius=radius)
     correct, wrong, remaining_labels = categorize_predictions(predictions, labels, max_dist=radius)
 
     return ImageResults(
         num_correct=len(correct),
         num_total=n_labels,
         predictions=tuple(predictions),
+        validations=tuple(validations),
         labels=tuple(labels),
         correct=tuple(correct),
         wrong=tuple(wrong),
@@ -408,6 +420,10 @@ def evaluate_dataset_entry(pair: tuple[Path, Path]) -> tuple[int, int]:
             print(f'{res.num_correct} / {res.num_total}')
             print(f'    Labels: {res.labels}')
             print(f'    Predictions: {res.predictions}')
+
+        for validation_result in res.validations:
+            # do_parameter_est(image, diffed, validation_result, f'{png.stem}_parameters.txt')
+            pass
 
         hightlight_predictions(image, diffed, res.correct, res.wrong, res.remaining_labels, png.stem)
 
