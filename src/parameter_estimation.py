@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from cv2 import CAP_PROP_XI_TEST_PATTERN_GENERATOR_SELECTOR
 import numpy as np
 import warnings
 
@@ -7,7 +8,7 @@ from process import ValidationResult
 
 @dataclass
 class SentinelData:
-  channel_dt_s_arr          =  np.array([0.507, 0.498])  # Time difference between channels 2-3 and 3-4
+  channel_dt_s_arr          = np.array([0.507, 0.498])  # Time difference between channels 2-3 and 3-4
   channel_resolution_m_arr  = 10 * np.ones(3, dtype=int) # Channel 2, 3 and 4 has an accuracy of 10 m
 
   # Data assumed about the satellite - haven't found better parameters
@@ -90,35 +91,25 @@ class EstimateAircraftParameters:
       return self.__invalid()
 
     # Calculating the change in distance between the channels
-    delta_pos = np.zeros((2, num_measurements - 1))
     rel_vel_hat_arr = np.zeros((2, num_measurements - 1))
 
     for idx in range(num_measurements - 1):
+      # Must iterate from the 'incorrect' order to counteract the effect from the 
+      # parallax effect
       current_measurement = coordinates[:, -(coordinates.shape[1] - 1) + idx]
       next_measurement = coordinates[:, -(coordinates.shape[1] - 1) + idx + 1]
 
-      print(current_measurement)
-      print(next_measurement)
-      print(" ")
-
-      # current_measurement = coordinates[:, idx]
-      # next_measurement = coordinates[:, idx + 1]
-      
-      d_pos = next_measurement - current_measurement
-
       # Currently, only one resolution on the camera is used to calculate the real position
       # Unsure how to mix multiple resolutions, when converting into a change in meter
-
-      # Converting into actual displacement in m
-      resolution = self.__sentinel_data.channel_resolution_m_arr[0]
-      delta_pos[:, idx] = d_pos * resolution
+      resolution = self.__sentinel_data.channel_resolution_m_arr[idx]
+      d_pos = (next_measurement - current_measurement) * resolution
 
       # Calculating the velocities
-      dt = self.__sentinel_data.channel_dt_s_arr[idx]
-      rel_vel_hat_arr[:, idx] = delta_pos[:, idx] / dt
+      dt = self.__sentinel_data.channel_dt_s_arr[-idx]
+      rel_vel_hat_arr[:, idx] = d_pos / dt
 
-    # TODO: Implement a least-square method to calculate the velocities
-    rel_vel_hat = np.average(a=rel_vel_hat_arr, axis=1)
+    # Might be better to use a least-square estimation instead of using the average
+    rel_vel_hat = np.mean(a=rel_vel_hat_arr, axis=1)
 
     # Calculate the different angles 
     # phi:    Relative course-angle
@@ -135,12 +126,16 @@ class EstimateAircraftParameters:
       warnings.warn("Invalid heading")
       return self.__invalid()
 
+    if abs(np.sin(theta - psi)) < 1e-2:
+      warnings.warn("Aircraft and satelitte almost parallell")
+      return self.__invalid()
+
     # Calculate the velocity and altitude of the aircraft
     vel_aircraft_hat = np.sin(phi - psi) / np.sin(theta - psi) * np.linalg.norm(rel_vel_hat)
-    h_aircraft_hat = np.sin(phi - theta) / np.sin(theta - psi) * np.linalg.norm(rel_vel_hat) / self.__sentinel_data.sentinel_abs_vel * self.__sentinel_data.sentinel_height_m 
-
-    print(vel_aircraft_hat)
-    print(h_aircraft_hat)
+    h_aircraft_hat = \
+        (np.sin(phi - theta) / np.sin(theta - psi)) \
+      * (np.linalg.norm(rel_vel_hat) / self.__sentinel_data.sentinel_abs_vel) \
+      * self.__sentinel_data.sentinel_height_m 
 
     self.__estimated_velocity = np.abs(vel_aircraft_hat)
     self.__estimated_height = np.abs(h_aircraft_hat)
@@ -177,7 +172,7 @@ class EstimateAircraftParameters:
     blue_center = validation.blue_center
     red_center = validation.red_center
 
-    # Images taken in order: rgb
+    # Images taken in order: bgr
     center_list = [blue_center, green_center, red_center]
 
     for (idx, center) in enumerate(center_list):
@@ -210,79 +205,64 @@ class EstimateAircraftParameters:
     """
     num_channels = self.__num_channels
     
-    reflectance_arr = np.zeros(num_channels)
-    # Iterate over all measured intensities in the channel_intensities, 
-    # and calculate channel reflectance
-    # return -1.0 # Until the code is developed properly
+    # Calculate weighted center, covariances and estimated heading for each channel
+    estimated_headings = np.zeros(num_channels)
 
     for ch in range(num_channels):
       # Iterate over all indeces assumed relevant
       channel_resolution_m = self.__sentinel_data.channel_resolution_m_arr[ch]
-      channel_intensity = np.sum(channel_intensities[ch].flatten(), axis=0)
-      reflectance_arr[ch] = channel_intensity
-      
-    # Calculate weighted center, covariances and estimated heading for each channel
-    weighted_coordinates = np.zeros((2, num_channels))
-    covariances = np.zeros((3, num_channels)) # sigma_xx, sigma_xy, sigma_yy stacked vertically for each channel
-    estimated_headings = np.zeros(num_channels)
-    for ch in range(num_channels):
-      channel_resolution_m = self.__sentinel_data.channel_resolution_m_arr[ch]
-      channel_reflectance = reflectance_arr[ch]
+      channel_reflectance = np.sum(channel_intensities[ch].flatten(), axis=0)
 
       if channel_reflectance <= self.__min_channel_reflectance:
         warnings.warn("Invalid channel reflectance for channel {}".format(ch))
         return self.__invalid_heading
 
       # Weighted center
+      x_bar = 0
+      y_bar = 0
+      (num_rows, num_cols) = channel_intensities.shape[1], channel_intensities.shape[2]
+      for row in range(num_rows):
+        for col in range(num_cols):
+          x_bar += col * channel_intensities[ch, row, col] 
+          y_bar += row * channel_intensities[ch, row, col] 
 
-      # Think there is an error here!
-      # x_bar = 0
-      # y_bar = 0
-      # (num_rows, num_cols) = channel_intensities.shape[1], channel_intensities.shape[2]
-      # for row in range(num_rows):
-      #   for col in range(num_cols):
-      #     x_bar += col * channel_intensities[ch, col, row] 
-      #     y_bar += row * channel_intensities[ch, col, row] 
+      # x_bar = np.mean(np.mean(channel_intensities[ch], axis=1)) # The difference between 0 and 1
+      # y_bar = np.mean(np.mean(channel_intensities[ch], axis=0))
 
-      x_bar = np.mean(np.mean(channel_intensities[ch], axis=0))
-      y_bar = np.mean(np.mean(channel_intensities[ch], axis=1))
-      
       x_bar = x_bar * channel_resolution_m / channel_reflectance
       y_bar = y_bar * channel_resolution_m / channel_reflectance
 
-      weighted_coordinates[:, ch] = np.array([x_bar, y_bar]).T
-
       # Covariances
-      # sigma_xx = 0
-      # sigma_xy = 0
-      # sigma_yy = 0
-      # for row in range(num_rows):
-      #   for col in range(num_cols):
-      #     sigma_xx += (col**2) * channel_intensities[ch, col, row] 
-      #     sigma_xy += (col * row) * channel_intensities[ch, col, row] 
-      #     sigma_yy += (row**2) * channel_intensities[ch, col, row] 
-      channel_intensity_cov = np.cov(channel_intensities[ch])
+      sigma_xx = 0
+      sigma_xy = 0
+      sigma_yy = 0
+      for row in range(num_rows):
+        for col in range(num_cols):
+          sigma_xx += (col**2) * channel_intensities[ch, row, col] 
+          sigma_xy += (col * row) * channel_intensities[ch, row, col] 
+          sigma_yy += (row**2) * channel_intensities[ch, row, col] 
+
+      # channel_intensity_cov = np.cov(channel_intensities[ch])
       
-      sigma_xx = channel_intensity_cov[0,0]
-      sigma_yy = channel_intensity_cov[1,1]
-      sigma_xy = channel_intensity_cov[0,1]
+      # sigma_xx = channel_intensity_cov[0,0]
+      # sigma_yy = channel_intensity_cov[1,1]
+      # sigma_xy = channel_intensity_cov[0,1]
 
-      sigma_xx = sigma_xx * ((channel_resolution_m / channel_reflectance)**2) - (x_bar**2)
-      sigma_xy = sigma_xy * ((channel_resolution_m / channel_reflectance)**2) - (x_bar * y_bar)
-      sigma_yy = sigma_yy * ((channel_resolution_m / channel_reflectance)**2) - (y_bar**2)
-
-      covariances[:, ch] = np.array([sigma_xx, sigma_xy, sigma_yy]).T
+      sigma_xx = sigma_xx * ((channel_resolution_m**2) / channel_reflectance) - (x_bar**2)
+      sigma_xy = sigma_xy * ((channel_resolution_m**2) / channel_reflectance) - (x_bar * y_bar)
+      sigma_yy = sigma_yy * ((channel_resolution_m**2) / channel_reflectance) - (y_bar**2)
 
       # Estimated headings
       if sigma_xx**2 - sigma_yy**2 == 0:
-        warnings.warn("Not enough information for channel {}".format(ch))
-        return self.__invalid_heading
+        warnings.warn("Perhaps not enough information for channel {}. Measurements may be fucked!".format(ch))
+      #   return self.__invalid_heading
 
-      heading_hat = 0.5 * np.arctan((2 * sigma_xy**2) / (sigma_xx**2 - sigma_yy**2))
+      # heading_hat = 0.5 * np.arctan((2 * sigma_xy**2) / (sigma_xx**2 - sigma_yy**2))
+      heading_hat = np.pi / 2 - 0.5 * np.arctan2((2 * sigma_xy**2), (sigma_xx**2 - sigma_yy**2)) # 90 deg - angle due to defining from north
       estimated_headings[ch] = heading_hat
 
+    # print(estimated_headings * 180 / np.pi + 180)
     return np.mean(estimated_headings) % (2 * np.pi)
-    # return 134.2862 / 180 * np.pi
 
   def __invalid(self) -> tuple:
     """
@@ -325,5 +305,5 @@ def do_parameter_est(
 
 if __name__ == '__main__':
   est_aircraft_params = EstimateAircraftParameters()
-  est_aircraft_params.estimate_parameters(cropped_image=None)
+  est_aircraft_params.estimate_parameters()
   est_aircraft_params.display_estimates()
