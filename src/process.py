@@ -15,14 +15,14 @@ from lib.color import linear_to_srgb, srgb_to_linear
 from lib.timeit import timeit
 
 
-output_path: Path
-
-
 # Controls whether to use a faster approximate SRGB-conversion (3x faster)
 fast_srgb_conv = False
 
 # Controls whether we process images in parallel
 parallel_processing = False
+
+# Number of pixels to pad on each edge of the image
+padding = 64
 
 ### Controls whether to generate output images in the `output/` folder.
 
@@ -44,12 +44,15 @@ DiffedImage = NewType('DiffedImage', np.ndarray)
 Prediction = tuple[tuple[int, int], float]
 
 
+output_path: Path
+
+
 def load_labels(path: Path) -> set[tuple[int, int]]:
     coords: set[tuple[int, int]] = set()
     with open(path) as f:
         for line in f:
             a, b = line.split(maxsplit=2)
-            coords.add((int(a), int(b)))
+            coords.add((int(a) + padding, int(b) + padding))
     return coords
 
 
@@ -57,7 +60,7 @@ def load_labels(path: Path) -> set[tuple[int, int]]:
 def load_image(path) -> OriginalImage:
     image = cv2.imread(str(path), cv2.IMREAD_COLOR) / 255.0
     image = srgb_to_linear(image, fast=fast_srgb_conv)
-    image = np.pad(image, ((32,32),(32,32),(0,0)))
+    image = np.pad(image, ((padding, padding), (padding, padding), (0, 0)))
     return image
 
 
