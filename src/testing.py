@@ -6,10 +6,10 @@ def main():
     import os 
     import sys
 
-    image = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-20-10-36-56_image_correct2.png'))
-    diffed = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-20-10-36-56_image_correct2_diff.png'))
-    # image = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-10-10-36-57_image_correct0.png'))
-    # diffed = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-10-10-36-57_image_correct0_diff.png'))
+    # image = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-20-10-36-56_image_correct2.png'))
+    # diffed = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-20-10-36-56_image_correct2_diff.png'))
+    image = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-10-10-36-57_image_correct0.png'))
+    diffed = load_image(os.path.join(sys.path[0], 'output.bak/2020-01-10-10-36-57_image_correct0_diff.png'))
     
 
     image_B = diffed[:, :, 0]
