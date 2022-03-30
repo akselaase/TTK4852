@@ -443,23 +443,21 @@ def test_image_predictions(
 pixel_value_distribution: list[float] = []
 pixel_value_distribution_diff: list[float] = []
 
-def evaluate_dataset_entry(
-    pair: tuple[Path, Path]
+def evaluate_image_labels(
+    png_path: Path,
+    labels: set[CoordinateI],
+    image: OriginalImage
 ) -> tuple[int, int, int]:
     """Evaluate our algorithm on a specific image with labels.
     Returns a tuple
     (true positive, false positive, false negative, total positive).
     """
-    png, txt = pair
-
-    labels = load_labels(txt)
 
     num_labels = len(labels)
     num_tp = 0
     num_fp = 0
     num_fn = 0
 
-    image = load_image(png)
     diffed = diff_channels(image)   
 
     for (x, y) in labels:
@@ -475,17 +473,35 @@ def evaluate_dataset_entry(
     with print_lock:
         sep = '\n\t - '
         predictions_str = sep.join(map(str, res.predictions))
-        print(f'{png.name} ({png.stat().st_size / 1024**2:.1f} MiB):')
+        print(f'{png_path.name} ({png_path.stat().st_size / 1024**2:.1f} MiB):')
         print(f'    True positives: {num_tp} / {num_labels}')
         print(f'    False negatives: {num_fn} / {num_labels}')
         print(f'    False positives: {num_fp}')
         print(f'    Labels: {res.labels}')
         print(f'    Predictions: {sep}{predictions_str}')
 
-    hightlight_predictions(image, diffed, res.correct, res.wrong, res.missed, png.stem)
+    hightlight_predictions(image, diffed, res.correct, res.wrong, res.missed, png_path.stem)
 
     gc.collect()
     return (num_tp, num_fp, num_fn)
+
+
+def evaluate_dataset_entry(pair: tuple[Path, Path]):
+    png, txt = pair
+    evaluate_image_labels(
+        png,
+        load_labels(txt),
+        load_image(png)
+    )
+
+
+def test_single_file(file: Path):
+    """Make predictions on a single file."""
+    evaluate_image_labels(
+        file,
+        set(),
+        load_image(file)
+    )
 
 
 def test_dataset(dir: Path):
@@ -551,6 +567,9 @@ if __name__ == '__main__':
 
     if path.is_dir():
         test_dataset(path)
+
+    elif path.is_file():
+        test_single_file(path)
 
     else:
         print('Path must be a directory.')
