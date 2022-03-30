@@ -38,9 +38,9 @@ supersampling = 10
 disable_all_saving = False
 
 # Output full image with overlaid red/yellow/green rectangles
-generate_highlights = False
+generate_highlights = True
 # Output crops of correct detections (true positives)
-generate_correct = False
+generate_correct = True
 # Output crops of missed detections (false negatives)
 generate_missed = True
 # Output crops of wrong detections (false positives)
