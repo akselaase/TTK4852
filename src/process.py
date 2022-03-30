@@ -391,11 +391,15 @@ def find_planes(
     X, Y = X[sorted_indices], Y[sorted_indices]
     visited = np.zeros(image.shape[:2], dtype=bool)
 
+    iterations = 0
+
     # Iterate through all pixels matching the threshold
     # in descending order of intensity
     for coord in zip(X, Y):
         if visited[coord]:
             continue
+
+        iterations += 1
         
         lx, hx, ly, hy = rect(*coord, clear_radius, image)
         visited[lx:hx, ly:hy] = 1
@@ -404,6 +408,9 @@ def find_planes(
         if validate_prediction(image, diffed, prediction):
             predictions.append(prediction)
 
+    with print_lock:
+        print(f'{len(predictions)=} / {iterations=} = {len(predictions)/iterations:.2%}')
+    
     return predictions
 
 
