@@ -499,7 +499,7 @@ def evaluate_image_labels(
 
 def evaluate_dataset_entry(pair: tuple[Path, Path]):
     png, txt = pair
-    evaluate_image_labels(
+    return evaluate_image_labels(
         png,
         load_labels(txt),
         load_image(png)
