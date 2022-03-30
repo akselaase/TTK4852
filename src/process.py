@@ -27,6 +27,8 @@ padding = 64
 
 # Minimum original green pixel intensity
 threshold = 0.1
+# Minimum diffed green pixel intensity
+diffed_threshold = 0.0000001 # anything above zero
 
 # Amount to scale images by when saving
 # (to better visualize exact plane coordinate)
@@ -379,7 +381,9 @@ def find_planes(
     `clear_radius` side for each detection."""
     predictions: list[Prediction] = []
 
-    X, Y = np.nonzero(image[:, :, 1] >= threshold)
+    X, Y = np.nonzero(
+        (image[:, :, 1] >= threshold) 
+        & (diffed[:, :, 1] >= diffed_threshold))
     values = image[X, Y, 1]
 
     # Sort by descending intensity
